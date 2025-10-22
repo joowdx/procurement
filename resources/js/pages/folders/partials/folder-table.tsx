@@ -57,7 +57,7 @@ export function FolderTable({ folders: folderList, onCreate, onEdit, onDelete, o
                                         <TooltipTrigger asChild>
                                             <Link
                                                 href={folders.show.url(folder.id)}
-                                                className="block font-medium hover:underline"
+                                                className="block hover:underline"
                                             >
                                                 <span className="block truncate">{folder.path}</span>
                                             </Link>
