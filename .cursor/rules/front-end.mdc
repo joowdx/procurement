@@ -1,0 +1,368 @@
+---
+alwaysApply: true
+---
+
+# Front-End
+
+## UI Component Library
+
+Always use **shadcn/ui** for all UI components.
+
+- Use shadcn components for all interface elements
+- Follow shadcn patterns and conventions
+- **ALWAYS install components before using them** - Never manually create shadcn components
+- Use the MCP shadcn server or CLI to install components:
+  - Search for components: Use `mcp_shadcn_search_items_in_registries`
+  - Get add command: Use `mcp_shadcn_get_add_command_for_items`
+  - Or run: `npx shadcn@latest add <component-name>`
+
+---
+
+## Navigation
+
+Navigation items are centralized in `/resources/js/config/navigation.ts` for reusability across all layouts.
+
+**To add/modify navigation items**, update `/resources/js/config/navigation.ts`:
+
+- `mainNavItems` - Main application navigation (Dashboard, Folders, Files, etc.)
+- `footerNavItems` - Footer/secondary navigation (Repository, Documentation, etc.)
+
+These items are automatically used by:
+- **App Sidebar** (`app-sidebar.tsx`) - Uses `mainNavItems` and `footerNavItems`
+- **App Header** (`app-header.tsx`) - Uses `mainNavItems` and `footerNavItems` (as rightNavItems)
+
+**Always update the central navigation config** - This ensures all layouts stay in sync automatically.
+
+---
+
+## TypeScript Guidelines
+
+### Type Definitions
+
+- **Always define types/interfaces** for:
+  - Component props
+  - API response data
+  - Form data
+  - State objects
+  - Function parameters and return values
+
+- **Use `interface` for object shapes**, especially for props and data models
+- **Use `type` for unions, intersections, and primitives**
+- **Export types** when they're used across multiple files
+
+### Backend Sync Rule
+
+**CRITICAL**: Always sync TypeScript type definitions with backend changes.
+
+When any of the following changes occur in the backend:
+- PHP model attributes or relationships modified
+- Database migrations adding/removing/changing columns
+- API response structure changes
+- Enum values updated
+
+You **MUST** immediately update the corresponding TypeScript interfaces in `/resources/js/types/` to match. This ensures type safety and prevents runtime errors.
+
+Example: If `files` table adds a `locked` column in Laravel, the TypeScript `File` interface must be updated to include `locked: boolean`.
+
+### Naming Conventions
+
+- **Files**: kebab-case (e.g., `app-sidebar.tsx`, `use-clipboard.ts`)
+- **Components**: PascalCase (e.g., `AppSidebar`, `NavMain`, `UserMenu`)
+- **Hooks**: camelCase starting with `use` (e.g., `useTwoFactorAuth`, `useClipboard`)
+- **Types/Interfaces**: PascalCase (e.g., `User`, `NavItem`, `TwoFactorSetupData`)
+- **Type files**: Use `index.d.ts` for shared types
+- **Props interfaces**: PascalCase without suffix (e.g., `NavItem`, `ButtonVariant`) unless Props suffix adds clarity
+- **Constants**: UPPER_SNAKE_CASE (e.g., `OTP_MAX_LENGTH`, `API_BASE_URL`)
+- **Variables/Functions**: camelCase (e.g., `mainNavItems`, `fetchQrCode`, `handleSubmit`)
+
+### Examples
+
+```typescript
+// Constants
+const OTP_MAX_LENGTH = 6;
+const API_BASE_URL = 'https://api.example.com';
+
+// Component props interface
+interface ButtonVariant {
+  variant?: 'primary' | 'secondary';
+  onClick: () => void;
+  children: React.ReactNode;
+}
+
+// API data models (sync with backend)
+interface User {
+  id: string; // ULID from Laravel
+  name: string;
+  email: string;
+  email_verified_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface File {
+  id: string; // ULID from Laravel
+  name: string;
+  description: string | null;
+  type: string; // MIME type
+  extension: string;
+  locked: boolean;
+  url: string; // Computed from latest version
+  size: number; // Computed from latest version
+  hash: string; // Computed from latest version
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+// Form data
+interface LoginFormData {
+  email: string;
+  password: string;
+}
+
+// Variables and functions
+const mainNavItems = [];
+const fetchQrCode = async () => {};
+const handleSubmit = () => {};
+```
+
+---
+
+## Data Display Patterns
+
+### File Listings
+
+Files can be displayed in two view modes (toggled via button in header):
+
+1. **Card View** (default) - Grid of file cards with metadata
+   - Component: `FileList` (file-list.tsx)
+   - Layout: `grid gap-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4`
+   - Shows: Icon, name, description, badges, folders, date, actions
+
+2. **List View** - Compact table/list view
+   - Component: `FileTable` (file-table.tsx)
+   - Layout: `<table>` with responsive columns
+   - Shows: Name, type, size, folders, date, actions
+
+**Infinite Scrolling**: File listings use infinite scroll (IntersectionObserver via `useInfiniteScroll` hook) to automatically load more items as user scrolls near the bottom.
+
+### File Upload Dialog
+
+**Location-Based Behavior:**
+- **From Folder Page**: Single folder assignment (hidden, auto-assigned)
+- **From Files Page**: Multi-folder selector with search
+
+**Folder Selector Features** (`showFolderSelector` prop):
+- **Searchable Dropdown**: Command component with search input
+- **Multi-Select**: Can assign file to multiple folders
+- **Hierarchical Display**: Shows full path (e.g., "Parent/Child")
+- **Selected Folders**: Display as removable badges
+- **API Integration**: Fetches folders from `FolderController.index()` with search support
+
+**Folder Display Format:**
+- Nested folders shown as: `Parent/Child/GrandChild`
+- Uses `full_path` from backend (built from `getFullPath()` method)
+- Ordered by `path` then `order` for hierarchical sorting
+
+### Folder Tree Display
+
+**Lazy Loading Implementation:**
+- **Initial Load**: Only root folders loaded with `children_count`
+- **On Expand**: Fetches children via `FolderController.show()` with `?children=true`
+- **Visual Hierarchy**: Tree lines (borders) show parent-child relationships
+- **API Endpoint**: `GET /folders/{id}?children=true` returns JSON array of children
+
+**Tree Lines Display:**
+- Level 0 (root): No tree lines
+- Level 1+: Vertical and horizontal lines connecting to parent
+- Uses border color for subtle visual hierarchy
+
+### Folder Reordering
+
+**Drag & Drop Implementation:**
+- **Library**: Uses `@dnd-kit` for drag and drop functionality
+- **Scope**: Only reorders first-level children (no nested reordering)
+- **Behavior**: Changes only the `order` attribute, not the parent
+- **Component**: `ReorderableFolderList` wraps folder items with sortable functionality
+- **API Endpoint**: `POST /folders/reorder` with `folders` array containing `{id, order}` objects
+
+**Available Locations:**
+1. **Folder Show Page**: Reorder subfolders within the current folder
+2. **Edit Folder Dialog**: Reorder children when editing a folder from the listing
+
+**Features:**
+- Drag handle (grip icon) for intuitive reordering
+- Visual feedback during drag (opacity change)
+- Automatic backend sync after each reorder
+- Loading indicator while saving
+- All folder actions (Create, Edit, Details, Delete) available in reorderable list
+
+### File Filters
+
+Files page supports the following filters (displayed as button tabs):
+
+- **Files** - Shows active files placed in folders (default, no filter param)
+  - Query: No filter
+  - Backend: `File::with(['version', 'folders', 'tags'])->has('placements')`
+  
+- **Unplaced** - Files not placed in any folders
+  - Query: `?filter=unplaced`
+  - Backend: `->doesntHave('placements')`
+  
+- **Deleted** - Soft-deleted files
+  - Query: `?filter=deleted`
+  - Backend: `->onlyTrashed()->with(['version'])`
+  - Shows restore option instead of delete
+
+**Filter Implementation:**
+- Filters reset pagination and clear accumulated files
+- Active filter shown with `variant="default"` button
+- Total count badge shown on "All Files" tab
+
+---
+
+## Design System
+
+### Dark Mode
+
+**Always add dark mode support** using Tailwind's dark mode utilities:
+
+- Use `dark:` prefix for dark mode variants
+- Common patterns:
+  - Text: `text-foreground dark:text-foreground`
+  - Backgrounds: `bg-background dark:bg-background`
+  - Borders: `border-border dark:border-border`
+  - Muted text: `text-muted-foreground` (already supports dark mode)
+  - Hover states: `hover:bg-accent dark:hover:bg-accent`
+  - Brand colors: `text-blue-500 dark:text-blue-400`
+
+**Examples:**
+```tsx
+// Folder icon with dark mode
+<FolderIcon className="h-5 w-5 text-blue-500 dark:text-blue-400" />
+
+// Tree lines with dark mode
+<div className="border-l-2 border-muted-foreground/20 dark:border-muted-foreground/30" />
+
+// Hover background with dark mode
+<div className="hover:bg-accent/50 dark:hover:bg-accent" />
+```
+
+**Best Practices:**
+- Use semantic color classes from shadcn (foreground, background, muted, etc.)
+- Adjust opacity for better contrast in dark mode (e.g., `/20` in light, `/30` in dark)
+- Test all components in both light and dark modes
+- Brand colors should be slightly lighter in dark mode (e.g., 500 → 400)
+
+---
+
+### Spacing & Layout
+
+Use **consistent, compact spacing** throughout the application:
+
+- **Page padding**: `p-4` (16px)
+- **Section gaps**: `gap-4` (16px) for main sections, `gap-6` (24px) for major sections
+- **Vertical spacing**: 
+  - `space-y-0.5` (2px) for very compact lists
+  - `space-y-1` (4px) for compact lists
+  - `space-y-2` (8px) for list items with more breathing room
+- **Headers**: `mb-2` to `mb-3` (8-12px) for section headers
+- **Empty states**: `py-10` to `py-12` (40-48px) vertical padding
+- **Cards/Containers**: 
+  - Card padding: `py-2` to `py-3` (8-12px)
+  - Container padding: `p-2` (8px) for bordered containers
+- **Buttons**: Use `size="sm"` for compact appearance
+- **Icons**: Use `h-3 w-3` to `h-4 w-4` (12-16px) for compact display
+- **Gaps**: Use `gap-1` to `gap-2` (4-8px) for compact layouts
+- **Text sizes**: 
+  - Page titles: `text-xl` (20px)
+  - Section headers: `text-base` (16px)
+  - Body text: `text-sm` (14px)
+  - Meta text: `text-xs` (12px)
+- **Grid spacing**: `gap-3` (12px) for card grids
+
+**Consistent, compact spacing creates a clean, professional look with efficient use of space.**
+
+---
+
+## React Guidelines
+
+### Component Structure
+
+- Use **functional components** with hooks
+- Keep components small and focused (single responsibility)
+- Extract complex logic into custom hooks
+- Use proper TypeScript typing for all props
+
+### File Organization
+
+```
+components/
+  ├── ui/              # shadcn components
+  ├── forms/           # Form components
+  ├── layouts/         # Layout components
+  └── [feature]/       # Feature-specific components
+```
+
+### Hooks Best Practices
+
+- Custom hooks should start with `use` (e.g., `useAuth`, `useFolders`)
+- Always type hook parameters and return values
+- Extract reusable logic into custom hooks
+
+### State Management
+
+- Use `useState` for local component state
+- Use `useContext` for shared state across components
+- Always type state with explicit types
+
+### Example Component
+
+```typescript
+// File: user-card.tsx
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+
+interface UserCardProps {
+  title: string;
+  description?: string;
+  onClose?: () => void;
+}
+
+export function UserCard({ title, description, onClose }: UserCardProps) {
+  const [isOpen, setIsOpen] = useState<boolean>(true);
+  
+  const handleClose = () => {
+    setIsOpen(false);
+    onClose?.();
+  };
+  
+  if (!isOpen) return null;
+  
+  return (
+    <div>
+      <h2>{title}</h2>
+      {description && <p>{description}</p>}
+      {onClose && <Button onClick={handleClose}>Close</Button>}
+    </div>
+  );
+}
+```
+
+---
+
+## Import Conventions
+
+- Use absolute imports with `@/` prefix when configured
+- Group imports: React → Third-party → Local components → Types → Styles
+- Sort imports alphabetically within groups
+
+```typescript
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/card';
+
+import type { User } from '@/types/user';
+```

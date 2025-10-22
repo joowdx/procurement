@@ -1,0 +1,335 @@
+---
+alwaysApply: true
+---
+
+# Procurement Management System
+
+## System Overview
+
+### Purpose
+
+A centralized platform for managing and publishing **procurement plans and notices**. The system organizes procurement documents using a hierarchical folder structure for easy navigation and access.
+
+### Core Document Types
+
+The system manages various procurement documents:
+
+- **Invitation to Bid (ITB)** - Public solicitations for competitive bidding
+- **Notice of Award (NOA)** - Formal contract award notifications to winning bidders
+- **Notice to Proceed (NTP)** - Authorization for contractors to begin work
+- **Request for Quotation (RFQ)** - Price quote solicitations from suppliers
+- **Supporting Documents** - Specifications, drawings, terms, etc.
+
+### Architecture
+
+- **Folders** = Document categories and navigation structure
+  - Hierarchical (can have parent/child relationships)
+  - Translate directly to navigation elements
+  - Examples: ITB, NOA, NTP, RFQ folders
+  
+- **Files** = Actual procurement documents
+  - Versioned (immutable history)
+  - Can belong to multiple folders via placements
+  - Soft-deletable with auto-purge after 30 days
+
+### Usage Flow
+
+1. Admin creates folders for document types (e.g., "ITB 2025", "NOA Q1")
+2. Admin uploads procurement documents into appropriate folders
+3. Folders appear as navigation on the public-facing page
+4. Users browse folder hierarchy to find and view documents
+
+---
+
+## Backend Development Guidelines
+
+### Naming Conventions
+
+**CRITICAL**: Follow **single-word naming** convention throughout the codebase.
+
+**Good:**
+```php
+// Models
+Folder, File, Version, Tag, Marking, Placement
+
+// Controller methods
+index(), store(), show(), update(), destroy()
+
+// Database columns
+name, path, depth, order, hash, disk, size
+
+// Variables
+$folder, $file, $version, $tag
+```
+
+**Bad:**
+```php
+// Avoid multi-word names
+FileVersion, DocumentCategory, FilePlacement
+createNewFolder(), getUserById()
+folder_name, file_path (unless required by convention)
+```
+
+---
+
+### Laravel Facades
+
+**ALWAYS use Facades** instead of helper functions for better IDE support and consistency.
+
+**Required:**
+```php
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Gate;
+
+// Use Facades
+Auth::id()
+Auth::user()
+Cache::remember('key', $seconds, fn() => ...)
+DB::table('users')->where('id', 1)->first()
+Storage::disk('s3')->put($path, $file)
+Hash::make($password)
+Gate::allows('update', $folder)
+```
+
+**Avoid:**
+```php
+// Don't use helpers
+auth()->id()
+cache()->remember()
+```
+
+---
+
+### Validation Rules
+
+#### Form Request Structure
+
+**ALWAYS create dedicated Form Request classes** for each controller endpoint.
+
+**Location Pattern:**
+```
+app/Http/Requests/{Resource}/
+├── Store{Resource}Request.php
+├── Update{Resource}Request.php
+└── Destroy{Resource}Request.php
+```
+
+**Current Structure:**
+```
+app/Http/Requests/
+├── Files/
+│   ├── StoreFileRequest.php      # POST /files
+│   ├── UpdateFileRequest.php     # PUT/PATCH /files/{id}
+│   └── DestroyFileRequest.php    # DELETE /files/{id}
+├── Folders/
+│   ├── StoreFolderRequest.php    # POST /folders
+│   ├── UpdateFolderRequest.php   # PUT/PATCH /folders/{id}
+│   ├── DestroyFolderRequest.php  # DELETE /folders/{id}
+│   └── ReorderFoldersRequest.php # POST /folders/reorder
+└── Settings/
+    └── Update{Setting}Request.php
+```
+
+#### Critical Validation Rules
+
+**Folder Name Uniqueness:**
+- Folder names must be **unique within the same parent folder**
+- Different parent folders **CAN** have subfolders with identical names
+- Only applies to non-deleted folders
+
+**Enforcement:**
+```php
+// Request validation
+use Illuminate\Validation\Rule;
+
+public function rules(): array
+{
+    return [
+        'name' => [
+            'required',
+            'string',
+            'max:255',
+            Rule::unique('folders', 'name')
+                ->where('parent_id', $this->parent_id)
+                ->whereNull('deleted_at')
+                ->ignore($this->folder), // For updates
+        ],
+    ];
+}
+
+public function messages(): array
+{
+    return [
+        'name.unique' => 'A folder with this name already exists in the same location.',
+    ];
+}
+```
+
+**Database Constraint:**
+```php
+// Migration
+$table->unique(['name', 'parent_id'], 'folders_name_parent_id_unique');
+```
+
+**File Hash Deduplication:**
+- Files with identical content hash cannot be uploaded again
+- Check if any file's latest version has the same SHA-256 hash
+- Prevents duplicate file uploads
+
+---
+
+### Migration Workflow
+
+**CRITICAL**: Follow this workflow to maintain clean migration history.
+
+#### Adding/Modifying Columns
+
+**Step-by-Step Process:**
+
+1. **Generate new migration:**
+   ```bash
+   php artisan make:migration add_locked_column_to_files_table
+   ```
+
+2. **Write migration code:**
+   ```php
+   public function up()
+   {
+       Schema::table('files', function (Blueprint $table) {
+           $table->boolean('locked')->default(false);
+       });
+   }
+   ```
+
+3. **Run migration:**
+   ```bash
+   php artisan migrate
+   ```
+
+4. **Update main table migration file** (e.g., `create_files_table.php`)
+   - Add the new column in the correct position (logical order)
+   - Do NOT use `->after()` - just place it where it belongs
+
+   ```php
+   // database/migrations/xxxx_create_files_table.php
+   public function up()
+   {
+       Schema::create('files', function (Blueprint $table) {
+           $table->ulid('id')->primary();
+           $table->string('name');
+           $table->text('description')->nullable();
+           $table->string('type');
+           $table->string('extension');
+           $table->boolean('locked')->default(false); // <- Added here
+           $table->json('metadata')->nullable();
+           // ... rest of columns
+       });
+   }
+   ```
+
+5. **Remove migration entry from database:**
+   ```php
+   // In Tinker or migration file
+   DB::table('migrations')
+       ->where('migration', '2025_01_15_add_locked_column_to_files_table')
+       ->delete();
+   ```
+
+6. **Delete the temporary migration file:**
+   ```bash
+   rm database/migrations/2025_01_15_add_locked_column_to_files_table.php
+   ```
+
+**Result**: Main migration file reflects current schema, no clutter from incremental changes.
+
+#### NEVER Run These Commands
+
+**FORBIDDEN without explicit permission:**
+```bash
+# DANGER: Destroys all data
+php artisan migrate:fresh
+php artisan migrate:fresh --seed
+
+# DANGER: Rolls back all migrations
+php artisan migrate:reset
+```
+
+**If user requests these commands:**
+1. Warn about data loss
+2. Ask for explicit confirmation
+3. Suggest safer alternatives (migrate:rollback with steps)
+
+---
+
+### Code Quality Standards
+
+#### Syntax Validation
+
+**ALWAYS validate generated code** before responding:
+
+```bash
+# PHP syntax check
+php -l app/Http/Controllers/FileController.php
+
+# Run static analysis
+./vendor/bin/phpstan analyse
+
+# Run code style fixer
+./vendor/bin/pint
+```
+
+#### Consistency Checklist
+
+**Every code change must maintain consistency in:**
+
+- ✅ **Formatting** - Indentation, spacing, line breaks
+- ✅ **Messages** - Success, error, validation messages
+- ✅ **Status codes** - HTTP response codes (200, 201, 204, 422, etc.)
+- ✅ **Structure** - File organization, method order
+- ✅ **Icons** - UI icon usage (shadcn icons)
+- ✅ **Sizing** - Button sizes, input heights, spacing
+- ✅ **Theme** - Color usage, dark mode support
+- ✅ **Spacing** - Padding, margins, gaps (refer to front-end.mdc)
+
+**Example - Consistent Response Format:**
+```php
+// Always return same structure
+return response()->json([
+    'message' => 'Folder created successfully.',
+    'data' => new FolderResource($folder),
+], 201);
+
+// Not:
+return ['success' => true, 'folder' => $folder]; // ❌ Inconsistent
+```
+
+---
+
+## Development Workflow
+
+### Before Making Changes
+
+1. **Read relevant model relationships** (see models-relationships.mdc)
+2. **Check existing validation rules** in Form Requests
+3. **Review front-end guidelines** (see front-end.mdc)
+4. **Verify naming conventions** (single-word rule)
+
+### After Making Changes
+
+1. **Validate syntax** - Run `php -l` on modified files
+2. **Update TypeScript types** - Sync with backend changes (see front-end.mdc)
+3. **Test validation** - Ensure form requests work correctly
+4. **Check consistency** - Format, messages, structure
+5. **Update migration** - Follow migration workflow
+
+### When Adding New Features
+
+1. **Create Form Request** - For each endpoint (store, update, destroy)
+2. **Add validation rules** - With clear error messages
+3. **Use Facades** - Instead of helpers
+4. **Follow naming** - Single-word convention
+5. **Document changes** - Update relevant .mdc files if needed

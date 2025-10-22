@@ -1,0 +1,364 @@
+---
+alwaysApply: true
+---
+
+# Entity Relationship Schema
+
+## Visual Diagram
+
+```mermaid
+erDiagram
+    USERS ||--o{ FOLDERS : "creates"
+    USERS ||--o{ FILES : "uploads"
+    USERS ||--o{ TAGS : "creates"
+    USERS ||--o{ COMMENTS : "creates"
+    FOLDERS ||--o{ FOLDERS : "contains (parent-child)"
+    FOLDERS ||--o{ PLACEMENTS : "has"
+    FILES ||--o{ PLACEMENTS : "belongs to"
+    FILES ||--o{ VERSIONS : "has"
+    FILES ||--o{ MARKINGS : "has"
+    FILES ||--o{ COMMENTS : "has"
+    TAGS ||--o{ MARKINGS : "applied to"
+    
+    FOLDERS {
+        ulid id PK "26-char ULID"
+        ulid parent_id FK "nullable, self-reference"
+        string name "required"
+        text description "nullable"
+        string path "materialized path e.g. /01HX5/01HX7/01HXA"
+        integer depth "nesting level, 0 for root"
+        integer order "display order within parent"
+        ulid created_by FK
+        ulid updated_by FK
+        ulid deactivated_by FK "nullable"
+        ulid deleted_by FK "nullable"
+        timestamp created_at
+        timestamp updated_at
+        timestamp deactivated_at "nullable"
+        timestamp deleted_at "nullable, soft delete"
+    }
+    
+    FILES {
+        ulid id PK "26-char ULID"
+        string name "required"
+        text description "nullable"
+        string type "MIME type"
+        string extension
+        boolean locked "default false"
+        json metadata "nullable"
+        ulid created_by FK
+        ulid updated_by FK
+        ulid deleted_by FK "nullable"
+        timestamp created_at
+        timestamp updated_at
+        timestamp deleted_at "nullable, soft delete"
+    }
+    
+    VERSIONS {
+        ulid id PK "26-char ULID"
+        ulid file_id FK "required"
+        integer number "version number, per file"
+        string hash "SHA-256 content hash"
+        string disk "storage driver: local, s3, external"
+        string path "storage path or full URL"
+        bigint size "bytes"
+        json metadata "nullable"
+        ulid created_by FK
+        timestamp created_at
+    }
+    
+    TAGS {
+        ulid id PK "26-char ULID"
+        string name "unique"
+        string slug "unique, URL-friendly"
+        string color "nullable, hex color"
+        text description "nullable"
+        ulid created_by FK
+        timestamp created_at
+        timestamp updated_at
+    }
+    
+    MARKINGS {
+        ulid id PK "26-char ULID"
+        ulid file_id FK "required"
+        ulid tag_id FK "required"
+        timestamp created_at
+    }
+    
+    COMMENTS {
+        ulid id PK "26-char ULID"
+        ulid file_id FK "required"
+        text content "required"
+        ulid created_by FK
+        ulid updated_by FK
+        timestamp created_at
+        timestamp updated_at
+    }
+    
+    PLACEMENTS {
+        ulid id PK "26-char ULID"
+        ulid file_id FK "required"
+        ulid folder_id FK "required"
+        integer order "display order within folder"
+        timestamp created_at
+    }
+    
+    USERS {
+        ulid id PK "26-char ULID"
+        string name
+        string email
+        timestamp email_verified_at
+        string password
+    }
+```
+
+## Core Entities
+
+### Folders
+Hierarchical folder structure with self-referencing parent-child relationship.
+
+**Attributes:**
+- `id` (ULID, PK) - 26-character ULID
+- `parent_id` (ULID, FK → folders.id, nullable) - Self-reference for nested folders
+- `name` (string, required)
+- `description` (text, nullable)
+- `path` (string) - Materialized path for efficient queries (e.g., "/01HX5/01HX7/01HXA")
+- `depth` (integer) - Nesting level (0 for root folders)
+- `order` (integer) - Display order within parent
+- `created_by` (ULID, FK → users.id)
+- `updated_by` (ULID, FK → users.id)
+- `deactivated_by` (ULID, FK → users.id, nullable) - User who deactivated the folder
+- `deleted_by` (ULID, FK → users.id, nullable) - User who deleted the folder
+- `created_at` (timestamp)
+- `updated_at` (timestamp)
+- `deactivated_at` (timestamp, nullable) - When folder was deactivated
+- `deleted_at` (timestamp, nullable) - Soft deletes
+
+**Relationships:**
+- Self-referencing: `folders.parent_id` → `folders.id` (one-to-many)
+- Belongs to User (creator): `folders.created_by` → `users.id`
+- Has many Files through `placements` (many-to-many)
+
+**Indexes:**
+- `parent_id` (for tree queries)
+- `path` (for ancestor/descendant queries)
+- `created_by`
+
+---
+
+### Files
+Main document/file storage entity. Physical storage and versioning handled by `versions` table.
+
+**Attributes:**
+- `id` (ULID, PK) - 26-character ULID
+- `name` (string, required)
+- `description` (text, nullable)
+- `type` (string) - MIME type
+- `extension` (string) - File extension
+- `locked` (boolean, default: false) - Prevent edits
+- `metadata` (json, nullable) - Additional metadata
+- `created_by` (ULID, FK → users.id)
+- `updated_by` (ULID, FK → users.id)
+- `deleted_by` (ULID, FK → users.id, nullable) - User who deleted the file
+- `created_at` (timestamp)
+- `updated_at` (timestamp)
+- `deleted_at` (timestamp, nullable) - Soft deletes
+
+**Relationships:**
+- Has many Versions: `versions.file_id` → `files.id` (one-to-many)
+- Has many Comments: `comments.file_id` → `files.id` (one-to-many)
+- Belongs to many Folders through `placements` (many-to-many)
+- Belongs to many Tags through `markings` (many-to-many)
+- Belongs to User (uploader): `files.created_by` → `users.id`
+
+**Indexes:**
+- `created_by`
+- `type`
+- `name` (for search)
+
+**File Model Configuration:**
+- Always eager load `version` (latest version) - Set in model's `$with` property
+
+**File Model Accessors:**
+- `version` (relationship) - Returns the latest version record (HasOne)
+- `url` (computed) - Returns the accessible URL based on latest version's disk type:
+  - `disk = "external"` → Returns `path` directly (already a full URL)
+  - `disk = "local"` → Returns `asset($path)` or public URL
+  - `disk = "s3"` → Returns `Storage::disk('s3')->url($path)`
+- `size` (computed) - Returns latest version's size
+- `hash` (computed) - Returns latest version's hash
+
+**File Model Constraints:**
+- A file with the same hash as the latest version cannot be uploaded again
+- When uploading, check if any existing file's latest version has the same hash
+- If hash exists, prevent upload or prompt user about duplicate
+
+**File Deletion Strategy:**
+- Soft delete at File level only (set `deleted_at` and `deleted_by`)
+- Versions are NEVER soft-deleted (immutable history)
+- Physical files remain on disk (may be referenced by other versions)
+- Restore: Clear `deleted_at` and `deleted_by` on File record
+- All versions immediately available after restore
+- Auto-purge: Use Laravel's `Prunable` trait to automatically delete records after X days (e.g., 30 days)
+
+---
+
+### Versions
+Version history and physical storage for files. Each file update creates a new version.
+
+**Attributes:**
+- `id` (ULID, PK) - 26-character ULID
+- `file_id` (ULID, FK → files.id, required)
+- `number` (integer, required) - Version number, auto-incremented per file (1, 2, 3...)
+- `hash` (string, required) - SHA-256 hash of file content for deduplication
+- `disk` (string, required) - Storage driver: "local", "s3", "external"
+- `path` (string, required) - Storage path (relative for local/s3, full URL for "external" disk)
+- `size` (bigint, required) - Size in bytes
+- `metadata` (json, nullable) - Version-specific metadata, changes made
+- `created_by` (ULID, FK → users.id)
+- `created_at` (timestamp)
+
+**Relationships:**
+- Belongs to File: `versions.file_id` → `files.id`
+- Belongs to User (who created version): `versions.created_by` → `users.id`
+
+**Indexes:**
+- `file_id`
+- `hash` (for deduplication lookup)
+- `created_by`
+- Unique composite: (`file_id`, `number`) - Ensure unique version numbers per file
+
+**Storage Strategy:**
+- Files stored by hash: `storage/{hash[0:2]}/{hash[2:4]}/{hash}`
+- Example: hash `abcdef123...` → `storage/ab/cd/abcdef123...`
+- Multiple versions with same content share the same physical file (deduplication)
+- Hash verification ensures file integrity
+
+**Disk Types:**
+- `local` - Files stored on local filesystem
+- `s3` - Files stored on AWS S3 or compatible storage
+- `external` - External files accessible via direct URL (path contains full URL)
+
+**Version Retention:**
+- Versions are immutable and never soft-deleted
+- When parent File is soft-deleted, all versions remain intact
+- Provides complete audit trail and enables file restoration
+- Physical file cleanup (optional): Periodically remove files with no version references
+
+---
+
+### Tags
+Flexible categorization for files.
+
+**Attributes:**
+- `id` (ULID, PK) - 26-character ULID
+- `name` (string, unique, required) - Tag name
+- `slug` (string, unique, required) - URL-friendly identifier
+- `color` (string, nullable) - Hex color code for UI display
+- `description` (text, nullable)
+- `created_by` (ULID, FK → users.id)
+- `created_at` (timestamp)
+- `updated_at` (timestamp)
+
+**Relationships:**
+- Belongs to many Files through `markings` (many-to-many)
+- Belongs to User (creator): `tags.created_by` → `users.id`
+
+**Indexes:**
+- `name` (unique)
+- `slug` (unique)
+- `created_by`
+
+---
+
+### Markings (Pivot Table)
+Junction table for many-to-many relationship between files and tags.
+
+**Attributes:**
+- `id` (ULID, PK) - 26-character ULID
+- `file_id` (ULID, FK → files.id, required)
+- `tag_id` (ULID, FK → tags.id, required)
+- `created_at` (timestamp)
+
+**Relationships:**
+- Belongs to File: `markings.file_id` → `files.id`
+- Belongs to Tag: `markings.tag_id` → `tags.id`
+
+**Indexes:**
+- `file_id`
+- `tag_id`
+- Unique composite: (`file_id`, `tag_id`) - Prevent duplicate tagging
+
+---
+
+### Comments
+Flat comments on files for collaboration and feedback.
+
+**Attributes:**
+- `id` (ULID, PK) - 26-character ULID
+- `file_id` (ULID, FK → files.id, required)
+- `content` (text, required) - Comment content
+- `created_by` (ULID, FK → users.id)
+- `updated_by` (ULID, FK → users.id)
+- `created_at` (timestamp)
+- `updated_at` (timestamp)
+
+**Relationships:**
+- Belongs to File: `comments.file_id` → `files.id`
+- Belongs to User (author): `comments.created_by` → `users.id`
+
+**Indexes:**
+- `file_id`
+- `created_by`
+- `created_at` (for chronological ordering)
+
+**Notes:**
+- Flat comment structure (no nesting/replies)
+- Comments are permanent (no soft deletes)
+- Displayed in chronological order
+
+---
+
+### Placements (Pivot Table)
+Junction table for many-to-many relationship between files and folders.
+
+**Attributes:**
+- `id` (ULID, PK) - 26-character ULID
+- `file_id` (ULID, FK → files.id, required)
+- `folder_id` (ULID, FK → folders.id, required)
+- `order` (integer) - Display order of file within folder
+- `created_at` (timestamp)
+
+**Relationships:**
+- Belongs to File: `placements.file_id` → `files.id`
+- Belongs to Folder: `placements.folder_id` → `folders.id`
+
+**Indexes:**
+- `file_id`
+- `folder_id`
+- Unique composite: (`file_id`, `folder_id`) - Prevent duplicate entries
+
+**Notes:**
+- Files can exist in multiple folders simultaneously
+- Files can also exist without being in any folder (orphaned/root files)
+
+---
+
+## Naming Conventions
+
+- **Attributes:** Use single-word names (except timestamps and foreign keys)
+- **Tables:** Use single-word plural names where possible
+- **Primary Keys:** Always use ULID (26-character)
+- **Audit Fields:** Include `created_by`, `updated_by`, `deleted_by` with corresponding timestamps
+
+---
+
+## Future Considerations
+
+As the application grows, you may want to add:
+
+- **Permissions** - Folder/file-level access control
+- **Shared Links** - Public/private file sharing with expiration
+- **Activity Logs** - Audit trail for file operations
+- **Favorites/Bookmarks** - User-specific quick access
+- **Notifications** - Alerts for file changes, mentions, new comments
