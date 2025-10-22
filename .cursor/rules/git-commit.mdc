@@ -1,0 +1,245 @@
+---
+alwaysApply: true
+---
+
+# Git Commit & Branch Guidelines
+
+## Branch Naming Convention
+
+**ALWAYS use prefixed branch names** following this pattern:
+
+```
+<type>/<descriptive-name>
+```
+
+### Branch Types
+
+- **`feat/`** - New features or enhancements
+  - Example: `feat/infinite-scroll-folders`
+  - Example: `feat/depth-filter`
+
+- **`fix/`** - Bug fixes
+  - Example: `fix/folder-link-object-issue`
+  - Example: `fix/modal-error-reset`
+
+- **`refactor/`** - Code refactoring (no functionality change)
+  - Example: `refactor/extract-tooltip-component`
+  - Example: `refactor/simplify-folder-query`
+
+- **`chore/`** - Maintenance tasks, dependency updates
+  - Example: `chore/update-dependencies`
+  - Example: `chore/cleanup-unused-imports`
+
+- **`docs/`** - Documentation only changes
+  - Example: `docs/update-readme`
+  - Example: `docs/add-api-documentation`
+
+- **`style/`** - Code style changes (formatting, no logic change)
+  - Example: `style/fix-indentation`
+  - Example: `style/consistent-spacing`
+
+- **`test/`** - Adding or updating tests
+  - Example: `test/add-folder-controller-tests`
+  - Example: `test/file-upload-validation`
+
+- **`perf/`** - Performance improvements
+  - Example: `perf/optimize-folder-queries`
+  - Example: `perf/lazy-load-images`
+
+### Branch Naming Rules
+
+- Use **lowercase** with **hyphens** (kebab-case)
+- Be **descriptive** but **concise**
+- Avoid abbreviations that aren't clear
+- Reference issue/ticket numbers if applicable
+
+**Good Examples:**
+```
+feat/user-authentication
+feat/two-factor-auth
+fix/login-validation-error
+fix/broken-file-download
+refactor/folder-service-layer
+chore/upgrade-laravel-11
+docs/installation-guide
+```
+
+**Bad Examples:**
+```
+feature/new-stuff          # ❌ Use 'feat/' not 'feature/'
+fix-bug                    # ❌ Missing type prefix
+feat/Feature123            # ❌ Use lowercase
+UpdateDocs                 # ❌ Use lowercase with prefix
+```
+
+---
+
+## Commit Message Format
+
+Follow the **Conventional Commits** specification with these rules:
+
+### Structure
+
+```
+<type>(<scope>): <subject>
+
+<body>
+
+<footer>
+```
+
+### Subject Line (First Line)
+
+**CRITICAL**: Maximum **120 characters**
+
+```
+<type>(<scope>): <subject>
+```
+
+- **`<type>`** - Commit type (required)
+  - `feat` - New feature
+  - `fix` - Bug fix
+  - `refactor` - Code refactoring
+  - `chore` - Maintenance
+  - `docs` - Documentation
+  - `style` - Formatting
+  - `test` - Tests
+  - `perf` - Performance
+
+- **`(<scope>)`** - Affected area (optional but recommended)
+  - Examples: `(folders)`, `(files)`, `(auth)`, `(ui)`, `(api)`
+  
+- **`<subject>`** - Brief description
+  - Use **imperative mood** ("add" not "added" or "adds")
+  - Start with **lowercase**
+  - **No period** at the end
+  - Be specific and clear
+
+### Commit Body (Optional)
+
+- Leave **one blank line** after subject
+- Wrap at **72 characters** per line
+- Explain **what** and **why**, not how
+- Use bullet points for multiple points
+
+### Commit Footer (Optional)
+
+- Reference issues: `Closes #123` or `Fixes #456`
+- Breaking changes: `BREAKING CHANGE: description`
+
+---
+
+## Commit Message Examples
+
+### ✅ Good Commits
+
+**Simple feature:**
+```
+feat(folders): add depth filter dropdown
+
+Allow users to filter folders by maximum depth level with options from 0 to max available depth. Defaults to 3 if more than 3 levels exist.
+```
+
+**Bug fix:**
+```
+fix(folders): correct link URL in reorderable list
+
+Change folders.show(folder.id) to folders.show.url(folder.id) to return string URL instead of object, preventing "[object Object]" in href.
+
+Fixes #42
+```
+
+**Refactoring:**
+```
+refactor(ui): remove icons from folder table
+
+Remove folder and file icons from table cells for cleaner, more consistent appearance. Keep only grip icon for reordering.
+```
+
+**Chore:**
+```
+chore: update TypeScript types for pagination
+
+Sync frontend PaginatedFolders interface with backend pagination structure to support infinite scrolling.
+```
+
+**Breaking change:**
+```
+feat(api): change folders endpoint to use pagination
+
+BREAKING CHANGE: /api/folders now returns paginated results instead of all folders. Update clients to handle pagination.
+```
+
+### ❌ Bad Commits
+
+```
+Update stuff                          # ❌ Too vague
+fix bug                               # ❌ No scope, unclear
+Added new feature for folders.        # ❌ Past tense, has period
+FIX: Folders not working              # ❌ Wrong format, capitalized
+feat(folders): Added a cool dropdown  # ❌ Past tense, informal
+```
+
+---
+
+## Complete Workflow Example
+
+### 1. Create Branch
+```bash
+git checkout -b feat/infinite-scroll-folders
+```
+
+### 2. Make Changes & Commit
+```bash
+git add resources/js/pages/folders/index.tsx
+git commit -m "feat(folders): implement infinite scrolling
+
+- Add pagination support in FolderController
+- Update frontend to accumulate loaded folders
+- Add LoadMoreTrigger component for auto-loading
+- Change from get() to paginate(20) in backend
+
+Loads 20 folders per page with automatic loading as user scrolls."
+```
+
+### 3. Push Branch
+```bash
+git push -u origin feat/infinite-scroll-folders
+```
+
+### 4. Create Pull Request
+- Title should match commit message format
+- Reference related issues
+- Describe changes and testing
+
+---
+
+## Quick Reference
+
+### Subject Line Format
+```
+<type>(<scope>): <subject in imperative, lowercase, max 120 chars>
+```
+
+### Common Types
+- `feat` - New feature
+- `fix` - Bug fix
+- `refactor` - Code restructuring
+- `chore` - Maintenance
+- `docs` - Documentation
+- `style` - Formatting
+- `test` - Testing
+- `perf` - Performance
+
+### Branch Format
+```
+<type>/<descriptive-name-in-kebab-case>
+```
+
+### Remember
+- ✅ Max 120 characters for subject line
+- ✅ Use imperative mood ("add", not "added")
+- ✅ No period at end of subject
+- ✅ Blank line before body
+- ✅ Wrap body at 72 characters
+- ✅ Explain what and why, not how
