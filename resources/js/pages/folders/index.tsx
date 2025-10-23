@@ -1,24 +1,28 @@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/confirm-dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
     Select,
     SelectContent,
     SelectItem,
     SelectTrigger,
 } from '@/components/ui/select';
+import { Spinner } from '@/components/ui/spinner';
 import { LoadMoreTrigger } from '@/hooks/use-infinite-scroll';
 import AppLayout from '@/layouts/app-layout';
 import folders from '@/routes/folders';
 import { type BreadcrumbItem, type Folder } from '@/types';
-import { Head, router } from '@inertiajs/react';
+import { Head, router, useForm } from '@inertiajs/react';
 import { FolderPlus, Search } from 'lucide-react';
 import { FormEventHandler, useEffect, useState } from 'react';
 import { CreateFolderDialog } from './partials/create-folder-dialog';
 import { EditFolderDialog } from './partials/edit-folder-dialog';
 import { FolderDetailsModal } from './partials/folder-details-modal';
 import { FolderTable } from './partials/folder-table';
+import { AlertError } from '@/components/alert-error';
 
 interface PaginatedFolders {
     data: Folder[];
@@ -43,8 +47,8 @@ interface FoldersIndexProps {
     folders: PaginatedFolders;
     filter?: string;
     search?: string;
-    max_depth?: number;
-    max_depth_available: number;
+    max_level?: number;
+    max_level_available: number;
     counts: {
         all: number;
         empty: number;
@@ -60,18 +64,20 @@ const breadcrumbs: BreadcrumbItem[] = [
     },
 ];
 
-export default function FoldersIndex({ folders: initialFolders, filter, search, max_depth, max_depth_available, counts }: FoldersIndexProps) {
+export default function FoldersIndex({ folders: initialFolders, filter, search, max_level, max_level_available, counts }: FoldersIndexProps) {
     const [createDialogOpen, setCreateDialogOpen] = useState<boolean>(false);
     const [selectedParent, setSelectedParent] = useState<Folder | null>(null);
     const [editFolder, setEditFolder] = useState<Folder | null>(null);
     const [deleteFolder, setDeleteFolder] = useState<Folder | null>(null);
+    const [forceDeleteFolder, setForceDeleteFolder] = useState<Folder | null>(null);
+    const [restoreFolder, setRestoreFolder] = useState<Folder | null>(null);
     const [detailsFolder, setDetailsFolder] = useState<Folder | null>(null);
     const [searchQuery, setSearchQuery] = useState<string>(search || '');
-    const [maxDepth, setMaxDepth] = useState<number | undefined>(max_depth);
+    const [maxLevel, setMaxLevel] = useState<number | undefined>(max_level);
     const [allFolders, setAllFolders] = useState<Folder[]>(initialFolders.data);
-    
-    // Generate depth options from 0 to max_depth_available
-    const depthOptions = Array.from({ length: max_depth_available + 1 }, (_, i) => i);
+
+    // Generate level options from 0 to max_level_available
+    const levelOptions = Array.from({ length: max_level_available + 1 }, (_, i) => i);
 
     useEffect(() => {
         setAllFolders(initialFolders.data);
@@ -87,7 +93,7 @@ export default function FoldersIndex({ folders: initialFolders, filter, search, 
         router.get(folders.index.url(), { 
             filter,
             search: searchQuery,
-            max_depth: maxDepth,
+            max_level: maxLevel,
         }, {
             preserveState: true,
         });
@@ -97,19 +103,19 @@ export default function FoldersIndex({ folders: initialFolders, filter, search, 
         router.get(folders.index.url(), { 
             filter: newFilter,
             search: searchQuery,
-            max_depth: maxDepth,
+            max_level: maxLevel,
         }, {
             preserveState: true,
         });
     };
 
-    const handleDepthChange = (value: string) => {
-        const newDepth = value === 'all' ? null : parseInt(value);
-        setMaxDepth(newDepth as number);
+    const handleLevelChange = (value: string) => {
+        const newLevel = value === 'all' ? null : parseInt(value);
+        setMaxLevel(newLevel as number);
         router.get(folders.index.url(), { 
             filter,
             search: searchQuery,
-            max_depth: newDepth,
+            max_level: newLevel,
         }, {
             preserveState: true,
         });
@@ -167,17 +173,17 @@ export default function FoldersIndex({ folders: initialFolders, filter, search, 
                     </form>
 
                     <Select
-                        value={maxDepth?.toString() || 'all'}
-                        onValueChange={handleDepthChange}
+                        value={maxLevel?.toString() || 'all'}
+                        onValueChange={handleLevelChange}
                     >
                         <SelectTrigger className="h-9 w-auto px-3">
-                            <span>Depth: {maxDepth?.toString() || 'All'}</span>
+                            <span>Level: {maxLevel?.toString() || 'All'}</span>
                         </SelectTrigger>
                         <SelectContent>
                             <SelectItem value="all">All</SelectItem>
-                            {depthOptions.map((depth) => (
-                                <SelectItem key={depth} value={depth.toString()}>
-                                    {depth}
+                            {levelOptions.map((level) => (
+                                <SelectItem key={level} value={level.toString()}>
+                                    {level}
                                 </SelectItem>
                             ))}
                         </SelectContent>
@@ -238,9 +244,12 @@ export default function FoldersIndex({ folders: initialFolders, filter, search, 
                     <>
                         <FolderTable 
                             folders={allFolders}
-                            onCreate={handleCreateSubfolder}
-                            onEdit={setEditFolder}
-                            onDelete={setDeleteFolder}
+                            isDeleted={filter === 'deleted'}
+                            onCreate={filter !== 'deleted' ? handleCreateSubfolder : undefined}
+                            onEdit={filter !== 'deleted' ? setEditFolder : undefined}
+                            onDelete={filter !== 'deleted' ? setDeleteFolder : undefined}
+                            onForceDelete={filter === 'deleted' ? setForceDeleteFolder : undefined}
+                            onRestore={filter === 'deleted' ? setRestoreFolder : undefined}
                             onDetails={setDetailsFolder}
                         />
                         <LoadMoreTrigger
@@ -281,12 +290,113 @@ export default function FoldersIndex({ folders: initialFolders, filter, search, 
                         }
                     }}
                     title="Delete Folder"
-                    description={`Are you sure you want to delete "${deleteFolder?.name}"? This will also delete all subfolders.`}
+                    description={`Are you sure you want to delete "${deleteFolder?.name}"? This will hide all subfolders.`}
                     confirmText="Delete"
                     cancelText="Cancel"
                     variant="destructive"
                 />
+
+                <ForceDeleteDialog 
+                    folder={forceDeleteFolder}
+                    onOpenChange={(open) => !open && setForceDeleteFolder(null)}
+                />
+
+                <ConfirmDialog
+                    open={!!restoreFolder}
+                    onOpenChange={(open) => !open && setRestoreFolder(null)}
+                    onConfirm={() => {
+                        if (restoreFolder) {
+                            router.post(`/folders/${restoreFolder.id}/restore`);
+                            setRestoreFolder(null);
+                        }
+                    }}
+                    title="Restore Folder"
+                    description={`Restore "${restoreFolder?.name}"?`}
+                    confirmText="Restore"
+                    cancelText="Cancel"
+                />
             </div>
         </AppLayout>
+    );
+}
+
+interface ForceDeleteDialogProps {
+    folder: Folder | null;
+    onOpenChange: (open: boolean) => void;
+}
+
+function ForceDeleteDialog({ folder, onOpenChange }: ForceDeleteDialogProps) {
+    const { data, setData, delete: destroy, processing, errors, reset, clearErrors } = useForm({
+        current_password: '',
+    });
+
+    const handleSubmit: FormEventHandler = (e) => {
+        e.preventDefault();
+        if (folder) {
+            destroy(folders.destroy.url(folder.id), {
+                preserveScroll: true,
+                onSuccess: () => {
+                    reset();
+                    onOpenChange(false);
+                },
+            });
+        }
+    };
+
+    const handleOpenChange = (open: boolean) => {
+        if (!open) {
+            reset();
+            clearErrors();
+        }
+        onOpenChange(open);
+    };
+
+    return (
+        <Dialog open={!!folder} onOpenChange={handleOpenChange}>
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>Permanently Delete Folder</DialogTitle>
+                    <DialogDescription>
+                        This action cannot be undone. This will permanently delete "{folder?.name}".
+                    </DialogDescription>
+                </DialogHeader>
+
+                <form onSubmit={handleSubmit}>
+                    <div className="space-y-4 py-4">
+                        <AlertError errors={errors} />
+
+                        <div className="space-y-2">
+                            <Label htmlFor="current_password">
+                                Confirm Password <span className="text-destructive">*</span>
+                            </Label>
+                            <Input
+                                id="current_password"
+                                type="password"
+                                value={data.current_password}
+                                onChange={(e) => setData('current_password', e.target.value)}
+                                placeholder="Enter your password to confirm"
+                                required
+                                autoFocus
+                            />
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => handleOpenChange(false)}
+                            disabled={processing}
+                        >
+                            Cancel
+                        </Button>
+                        <Button type="submit" variant="destructive" disabled={processing}>
+                            {processing && <Spinner className="mr-2 h-4 w-4" />}
+                            Delete
+                        </Button>
+                    </DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
     );
 }

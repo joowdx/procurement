@@ -1,18 +1,29 @@
+import { AlertError } from '@/components/alert-error';
 import { Button } from '@/components/ui/button';
+import { ConfirmDialog } from '@/components/confirm-dialog';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Spinner } from '@/components/ui/spinner';
 import AppLayout from '@/layouts/app-layout';
 import folders from '@/routes/folders';
 import { type BreadcrumbItem, type Folder } from '@/types';
-import { Head } from '@inertiajs/react';
-import { FolderPlus, Upload } from 'lucide-react';
-import { useState } from 'react';
+import { Head, router, useForm } from '@inertiajs/react';
+import { FolderPlus, RotateCcw, Trash2, Upload } from 'lucide-react';
+import { FormEventHandler, useState } from 'react';
 import { FileList } from '../files/partials/file-list';
 import { UploadFileDialog } from '../files/partials/upload-file-dialog';
 import { CreateFolderDialog } from './partials/create-folder-dialog';
 import { EditFolderDialog } from './partials/edit-folder-dialog';
 import { FolderDetailsModal } from './partials/folder-details-modal';
 import { ReorderableFolderList } from './partials/reorderable-folder-list';
-import { ConfirmDialog } from '@/components/confirm-dialog';
-import { router } from '@inertiajs/react';
 
 interface FolderShowProps {
     folder: Folder;
@@ -24,7 +35,11 @@ export default function FolderShow({ folder }: FolderShowProps) {
     const [selectedParent, setSelectedParent] = useState<Folder | null>(null);
     const [editFolder, setEditFolder] = useState<Folder | null>(null);
     const [deleteFolder, setDeleteFolder] = useState<Folder | null>(null);
+    const [forceDeleteFolder, setForceDeleteFolder] = useState<Folder | null>(null);
+    const [restoreFolder, setRestoreFolder] = useState<Folder | null>(null);
     const [detailsFolder, setDetailsFolder] = useState<Folder | null>(null);
+    
+    const isDeleted = !!folder.deleted_at;
 
     const handleCreateSubfolder = (parentFolder: Folder) => {
         setSelectedParent(parentFolder);
@@ -61,21 +76,16 @@ export default function FolderShow({ folder }: FolderShowProps) {
             },
         ];
 
-        // Build ancestor chain
-        const ancestors: Folder[] = [];
-        let current = folder.parent;
-        while (current) {
-            ancestors.unshift(current);
-            current = current.parent;
-        }
-
-        // Add all ancestors as breadcrumbs
-        ancestors.forEach(ancestor => {
-            crumbs.push({
-                title: ancestor.name,
-                href: folders.show.url(ancestor.id),
+        // Add all ancestors as breadcrumbs (already loaded by backend)
+        if (folder.ancestors && folder.ancestors.length > 0) {
+            // Ancestors are ordered from root to closest parent
+            folder.ancestors.forEach(ancestor => {
+                crumbs.push({
+                    title: ancestor.name,
+                    href: folders.show.url(ancestor.id),
+                });
             });
-        });
+        }
 
         // Add current folder
         crumbs.push({
@@ -106,18 +116,49 @@ export default function FolderShow({ folder }: FolderShowProps) {
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setCreateDialogOpen(true)}
-                        >
-                            <FolderPlus className="mr-2 h-4 w-4" />
-                            New Subfolder
-                        </Button>
-                        <Button size="sm" onClick={() => setUploadDialogOpen(true)}>
-                            <Upload className="mr-2 h-4 w-4" />
-                            Upload File
-                        </Button>
+                        {isDeleted ? (
+                            <>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setRestoreFolder(folder)}
+                                >
+                                    <RotateCcw className="mr-2 h-4 w-4" />
+                                    Restore
+                                </Button>
+                                <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    onClick={() => setForceDeleteFolder(folder)}
+                                >
+                                    <Trash2 className="mr-2 h-4 w-4" />
+                                    Delete
+                                </Button>
+                            </>
+                        ) : (
+                            <>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setCreateDialogOpen(true)}
+                                >
+                                    <FolderPlus className="mr-2 h-4 w-4" />
+                                    New Subfolder
+                                </Button>
+                                <Button size="sm" onClick={() => setUploadDialogOpen(true)}>
+                                    <Upload className="mr-2 h-4 w-4" />
+                                    Upload File
+                                </Button>
+                                <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    onClick={() => setDeleteFolder(folder)}
+                                >
+                                    <Trash2 className="mr-2 h-4 w-4" />
+                                    Delete
+                                </Button>
+                            </>
+                        )}
                     </div>
                 </div>
 
@@ -193,7 +234,32 @@ export default function FolderShow({ folder }: FolderShowProps) {
                     onOpenChange={(open) => !open && setDeleteFolder(null)}
                     onConfirm={confirmDelete}
                     title="Delete Folder"
-                    description={`Are you sure you want to delete "${deleteFolder?.name}"? This action cannot be undone.`}
+                    description={`Are you sure you want to delete "${deleteFolder?.name}"? This will hide all subfolders.`}
+                    confirmText="Delete"
+                    cancelText="Cancel"
+                    variant="destructive"
+                />
+
+                <ForceDeleteDialog 
+                    folder={forceDeleteFolder}
+                    onOpenChange={(open) => !open && setForceDeleteFolder(null)}
+                />
+
+                <ConfirmDialog
+                    open={!!restoreFolder}
+                    onOpenChange={(open) => !open && setRestoreFolder(null)}
+                    onConfirm={() => {
+                        if (restoreFolder) {
+                            router.post(`/folders/${restoreFolder.id}/restore`, {}, {
+                                preserveScroll: true,
+                                onSuccess: () => setRestoreFolder(null),
+                            });
+                        }
+                    }}
+                    title="Restore Folder"
+                    description={`Restore "${restoreFolder?.name}"?`}
+                    confirmText="Restore"
+                    cancelText="Cancel"
                 />
 
                 <UploadFileDialog
@@ -203,6 +269,89 @@ export default function FolderShow({ folder }: FolderShowProps) {
                 />
             </div>
         </AppLayout>
+    );
+}
+
+interface ForceDeleteDialogProps {
+    folder: Folder | null;
+    onOpenChange: (open: boolean) => void;
+}
+
+function ForceDeleteDialog({ folder, onOpenChange }: ForceDeleteDialogProps) {
+    const { data, setData, delete: destroy, processing, errors, reset, clearErrors } = useForm({
+        current_password: '',
+    });
+
+    const handleSubmit: FormEventHandler = (e) => {
+        e.preventDefault();
+        if (folder) {
+            destroy(folders.destroy.url(folder.id), {
+                preserveScroll: true,
+                onSuccess: () => {
+                    reset();
+                    onOpenChange(false);
+                    // Redirect to folders index after force delete
+                    router.visit(folders.index().url);
+                },
+            });
+        }
+    };
+
+    const handleOpenChange = (open: boolean) => {
+        if (!open) {
+            reset();
+            clearErrors();
+        }
+        onOpenChange(open);
+    };
+
+    return (
+        <Dialog open={!!folder} onOpenChange={handleOpenChange}>
+            <DialogContent>
+                <DialogHeader>
+                    <DialogTitle>Permanently Delete Folder</DialogTitle>
+                    <DialogDescription>
+                        This action cannot be undone. This will permanently delete "{folder?.name}".
+                    </DialogDescription>
+                </DialogHeader>
+
+                <form onSubmit={handleSubmit}>
+                    <div className="space-y-4 py-4">
+                        <AlertError errors={errors} />
+
+                        <div className="space-y-2">
+                            <Label htmlFor="current_password">
+                                Confirm Password <span className="text-destructive">*</span>
+                            </Label>
+                            <Input
+                                id="current_password"
+                                type="password"
+                                value={data.current_password}
+                                onChange={(e) => setData('current_password', e.target.value)}
+                                placeholder="Enter your password to confirm"
+                                required
+                                autoFocus
+                            />
+                        </div>
+                    </div>
+
+                    <DialogFooter>
+                        <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => handleOpenChange(false)}
+                            disabled={processing}
+                        >
+                            Cancel
+                        </Button>
+                        <Button type="submit" variant="destructive" disabled={processing}>
+                            {processing && <Spinner className="mr-2 h-4 w-4" />}
+                            Delete
+                        </Button>
+                    </DialogFooter>
+                </form>
+            </DialogContent>
+        </Dialog>
     );
 }
 
