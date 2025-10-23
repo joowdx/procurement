@@ -7,34 +7,37 @@ use App\Http\Requests\Folders\ReorderFoldersRequest;
 use App\Http\Requests\Folders\StoreFolderRequest;
 use App\Http\Requests\Folders\UpdateFolderRequest;
 use App\Models\Folder;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
+use Inertia\Response;
 
 class FolderController extends Controller
 {
     /**
      * Display a listing of folders.
      */
-    public function index(Request $request)
+    public function index(Request $request): Response|JsonResponse
     {
         // API request for folder selection (file upload)
         if ($request->wantsJson() && ! $request->has('filter')) {
-            $query = Folder::query();
+            $query = Folder::withoutDeletedAncestors();
 
             if ($search = $request->get('search')) {
                 $query->where('name', 'like', "%{$search}%");
             }
 
-            $folders = $query->orderBy('path')
+            $folders = $query->orderBy('route')
                 ->orderBy('order')
                 ->get()
                 ->map(function ($folder) {
                     return [
                         'id' => $folder->id,
                         'name' => $folder->name,
-                        'path' => $folder->path,
+                        'route' => $folder->route,
                     ];
                 });
 
@@ -45,44 +48,45 @@ class FolderController extends Controller
         $filter = $request->get('filter');
         $search = $request->get('search');
 
-        // Calculate maximum depth in database
-        $maxDepthAvailable = Folder::max('depth') ?? 0;
+        // Calculate maximum level in database
+        $maxLevelAvailable = Folder::max('level') ?? 0;
 
-        // Set default max_depth: 3 if available depth > 3, otherwise use max available
-        $defaultMaxDepth = $maxDepthAvailable > 3 ? 3 : $maxDepthAvailable;
-        $maxDepth = $request->get('max_depth', $defaultMaxDepth);
+        // Set default max_level: 3 if available level > 3, otherwise use max available
+        $defaultMaxLevel = $maxLevelAvailable > 3 ? 3 : $maxLevelAvailable;
+        $maxLevel = $request->get('max_level', $defaultMaxLevel);
 
         if ($filter === 'empty') {
-            // Empty folders (no files and no subfolders)
-            $query = Folder::doesntHave('placements')
+            // Empty folders (no files and no subfolders, excluding those with deleted ancestors)
+            $query = Folder::withoutDeletedAncestors()
+                ->doesntHave('placements')
                 ->doesntHave('children');
         } elseif ($filter === 'deleted') {
-            // Soft deleted folders
+            // ALL soft deleted folders (including those with deleted ancestors)
             $query = Folder::onlyTrashed();
         } else {
-            // All active folders
-            $query = Folder::query();
+            // All active folders (excluding those with deleted ancestors)
+            $query = Folder::withoutDeletedAncestors();
         }
 
-        // Apply search directly to path column
-        if ($search) {
-            $query->where('path', 'like', "%{$search}%");
+        // Apply search (skip for deleted filter as it doesn't use route column reliably)
+        if ($search && $filter !== 'deleted') {
+            $query->where('route', 'like', "%{$search}%");
         }
 
-        // Apply depth filter
-        if ($maxDepth !== null && $maxDepth !== '') {
-            $query->where('depth', '<=', (int) $maxDepth);
+        // Apply level filter (skip for deleted filter)
+        if ($maxLevel !== null && $maxLevel !== '' && $filter !== 'deleted') {
+            $query->where('level', '<=', (int) $maxLevel);
         }
 
         $folders = $query->withCount(['children', 'placements'])
-            ->orderBy('path')
+            ->orderBy('route')
             ->orderBy('order')
             ->paginate(20);
 
         // Get counts for all filters
         $counts = [
-            'all' => Folder::count(),
-            'empty' => Folder::doesntHave('placements')->doesntHave('children')->count(),
+            'all' => Folder::withoutDeletedAncestors()->count(),
+            'empty' => Folder::withoutDeletedAncestors()->doesntHave('placements')->doesntHave('children')->count(),
             'deleted' => Folder::onlyTrashed()->count(),
         ];
 
@@ -90,8 +94,8 @@ class FolderController extends Controller
             'folders' => $folders,
             'filter' => $filter,
             'search' => $search,
-            'max_depth' => $maxDepth,
-            'max_depth_available' => $maxDepthAvailable,
+            'max_level' => $maxLevel,
+            'max_level_available' => $maxLevelAvailable,
             'counts' => $counts,
         ]);
     }
@@ -99,7 +103,7 @@ class FolderController extends Controller
     /**
      * Store a newly created folder.
      */
-    public function store(StoreFolderRequest $request)
+    public function store(StoreFolderRequest $request): RedirectResponse
     {
         $validated = $request->validated();
 
@@ -109,7 +113,7 @@ class FolderController extends Controller
             'parent_id' => $validated['parent_id'],
             'name' => $validated['name'],
             'description' => $validated['description'] ?? null,
-            'depth' => $parent ? $parent->depth + 1 : 0,
+            'level' => $parent ? $parent->level + 1 : 0,
             'order' => Folder::where('parent_id', $validated['parent_id'])->max('order') + 1,
             'created_by' => Auth::id(),
             'updated_by' => Auth::id(),
@@ -128,7 +132,7 @@ class FolderController extends Controller
     /**
      * Display the specified folder.
      */
-    public function show(Request $request, Folder $folder)
+    public function show(Request $request, Folder $folder): Response|JsonResponse
     {
         // API request for lazy loading children
         if ($request->wantsJson() || $request->has('children')) {
@@ -152,8 +156,10 @@ class FolderController extends Controller
             'placements',
         ]);
 
-        // Load all ancestors using the package
-        $folder->load('ancestors');
+        // Load all ancestors using the package (including trashed)
+        $folder->loadMissing(['ancestors' => function ($query) {
+            $query->withTrashed();
+        }]);
 
         return Inertia::render('folders/show', [
             'folder' => $folder,
@@ -163,17 +169,17 @@ class FolderController extends Controller
     /**
      * Update the specified folder.
      */
-    public function update(UpdateFolderRequest $request, Folder $folder)
+    public function update(UpdateFolderRequest $request, Folder $folder): RedirectResponse
     {
         $validated = $request->validated();
 
         $folder->updated_by = Auth::id();
 
-        // If parent changes, update depth
+        // If parent changes, update level
         if (isset($validated['parent_id']) && $validated['parent_id'] !== $folder->parent_id) {
             $parent = $validated['parent_id'] ? Folder::find($validated['parent_id']) : null;
             $folder->parent_id = $validated['parent_id'];
-            $folder->depth = $parent ? $parent->depth + 1 : 0;
+            $folder->level = $parent ? $parent->level + 1 : 0;
         }
 
         if (isset($validated['name'])) {
@@ -191,18 +197,39 @@ class FolderController extends Controller
 
     /**
      * Remove the specified folder.
+     * If already trashed, force delete with password confirmation.
+     * Otherwise, soft delete.
      */
-    public function destroy(DestroyFolderRequest $request, Folder $folder)
+    public function destroy(DestroyFolderRequest $request, Folder $folder): RedirectResponse
     {
+        if ($folder->trashed()) {
+            $folder->forceDelete();
+
+            return redirect()->back()->with('success', 'Folder permanently deleted.');
+        }
+
         $folder->delete();
 
         return redirect()->back()->with('success', 'Folder deleted successfully.');
     }
 
     /**
+     * Restore a soft-deleted folder.
+     */
+    public function restore(Request $request, string $id): RedirectResponse
+    {
+        $folder = Folder::withTrashed()->findOrFail($id);
+        $folder->restore();
+        $folder->deleted_by = null;
+        $folder->save();
+
+        return redirect()->back()->with('success', 'Folder restored successfully.');
+    }
+
+    /**
      * Reorder folders.
      */
-    public function reorder(ReorderFoldersRequest $request)
+    public function reorder(ReorderFoldersRequest $request): RedirectResponse
     {
         $validated = $request->validated();
 
