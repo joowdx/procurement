@@ -146,14 +146,12 @@ class FolderController extends Controller
 
         // Regular page request
         // Fresh load to ensure we get latest data
-        $folder = $folder->fresh([
+        $folder->load([
             'children' => function ($query) {
                 $query->withCount('children')->orderBy('order');
             },
-            'files' => function ($query) {
-                $query->withSum('versions', 'downloads');
-            },
             'placements',
+            'files.version',
         ]);
 
         // Load all ancestors using the package (including trashed)
