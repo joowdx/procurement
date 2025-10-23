@@ -14,17 +14,20 @@ import {
 import folders from '@/routes/folders';
 import { type Folder } from '@/types';
 import { Link } from '@inertiajs/react';
-import { Edit, Info, MoreVertical, Plus, Trash2 } from 'lucide-react';
+import { Edit, Info, MoreVertical, Plus, RotateCcw, Trash2 } from 'lucide-react';
 
 interface FolderTableProps {
     folders: Folder[];
+    isDeleted?: boolean;
     onCreate?: (folder: Folder) => void;
     onEdit?: (folder: Folder) => void;
     onDelete?: (folder: Folder) => void;
+    onForceDelete?: (folder: Folder) => void;
+    onRestore?: (folder: Folder) => void;
     onDetails?: (folder: Folder) => void;
 }
 
-export function FolderTable({ folders: folderList, onCreate, onEdit, onDelete, onDetails }: FolderTableProps) {
+export function FolderTable({ folders: folderList, isDeleted, onCreate, onEdit, onDelete, onForceDelete, onRestore, onDetails }: FolderTableProps) {
     return (
         <TooltipProvider>
             <div className="border rounded-lg overflow-hidden">
@@ -59,11 +62,11 @@ export function FolderTable({ folders: folderList, onCreate, onEdit, onDelete, o
                                                 href={folders.show.url(folder.id)}
                                                 className="block hover:underline"
                                             >
-                                                <span className="block truncate">{folder.path}</span>
+                                                <span className="block truncate">{folder.route}</span>
                                             </Link>
                                         </TooltipTrigger>
                                         <TooltipContent>
-                                            <p>{folder.path}</p>
+                                            <p>{folder.route}</p>
                                         </TooltipContent>
                                     </Tooltip>
                                     {folder.description && (
@@ -105,32 +108,54 @@ export function FolderTable({ folders: folderList, onCreate, onEdit, onDelete, o
                                                 </Button>
                                             </DropdownMenuTrigger>
                                             <DropdownMenuContent align="end">
-                                                {onCreate && (
-                                                    <DropdownMenuItem onClick={() => onCreate(folder)}>
-                                                        <Plus className="mr-2 h-4 w-4" />
-                                                        Create
-                                                    </DropdownMenuItem>
-                                                )}
-                                                {onEdit && (
-                                                    <DropdownMenuItem onClick={() => onEdit(folder)}>
-                                                        <Edit className="mr-2 h-4 w-4" />
-                                                        Edit
-                                                    </DropdownMenuItem>
-                                                )}
-                                                {onDetails && (
-                                                    <DropdownMenuItem onClick={() => onDetails(folder)}>
-                                                        <Info className="mr-2 h-4 w-4" />
-                                                        Details
-                                                    </DropdownMenuItem>
-                                                )}
-                                                {onDelete && (
-                                                    <DropdownMenuItem
-                                                        className="text-destructive focus:text-destructive"
-                                                        onClick={() => onDelete(folder)}
-                                                    >
-                                                        <Trash2 className="mr-2 h-4 w-4" />
-                                                        Delete
-                                                    </DropdownMenuItem>
+                                                {isDeleted ? (
+                                                    <>
+                                                        {onRestore && (
+                                                            <DropdownMenuItem onClick={() => onRestore(folder)}>
+                                                                <RotateCcw className="mr-2 h-4 w-4" />
+                                                                Restore
+                                                            </DropdownMenuItem>
+                                                        )}
+                                                        {onForceDelete && (
+                                                            <DropdownMenuItem
+                                                                className="text-destructive focus:text-destructive"
+                                                                onClick={() => onForceDelete(folder)}
+                                                            >
+                                                                <Trash2 className="mr-2 h-4 w-4" />
+                                                                Delete
+                                                            </DropdownMenuItem>
+                                                        )}
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        {onCreate && (
+                                                            <DropdownMenuItem onClick={() => onCreate(folder)}>
+                                                                <Plus className="mr-2 h-4 w-4" />
+                                                                Create
+                                                            </DropdownMenuItem>
+                                                        )}
+                                                        {onEdit && (
+                                                            <DropdownMenuItem onClick={() => onEdit(folder)}>
+                                                                <Edit className="mr-2 h-4 w-4" />
+                                                                Edit
+                                                            </DropdownMenuItem>
+                                                        )}
+                                                        {onDetails && (
+                                                            <DropdownMenuItem onClick={() => onDetails(folder)}>
+                                                                <Info className="mr-2 h-4 w-4" />
+                                                                Details
+                                                            </DropdownMenuItem>
+                                                        )}
+                                                        {onDelete && (
+                                                            <DropdownMenuItem
+                                                                className="text-destructive focus:text-destructive"
+                                                                onClick={() => onDelete(folder)}
+                                                            >
+                                                                <Trash2 className="mr-2 h-4 w-4" />
+                                                                Delete
+                                                            </DropdownMenuItem>
+                                                        )}
+                                                    </>
                                                 )}
                                             </DropdownMenuContent>
                                         </DropdownMenu>

@@ -112,7 +112,7 @@ export function FolderDetailsModal({
 
                     <div>
                         <h4 className="text-sm font-medium mb-1">Path</h4>
-                        <code className="text-xs bg-muted dark:bg-muted/50 px-2 py-1 rounded">{folder.path}</code>
+                        <code className="text-xs bg-muted dark:bg-muted/50 px-2 py-1 rounded">{folder.route}</code>
                     </div>
                 </div>
             </DialogContent>

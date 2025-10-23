@@ -373,7 +373,7 @@ export function UploadFileDialog({
                                                                         : 'opacity-0'
                                                                 }`}
                                                             />
-                                                            <span className="truncate">{folder.path}</span>
+                                                            <span className="truncate">{folder.route}</span>
                                                         </CommandItem>
                                                     ))}
                                                 </CommandGroup>
@@ -390,7 +390,7 @@ export function UploadFileDialog({
                                                 className="text-xs gap-1"
                                             >
                                                 <span className="truncate max-w-[200px]">
-                                                    {folder.path}
+                                                    {folder.route}
                                                 </span>
                                                 <X
                                                     className="h-3 w-3 cursor-pointer"

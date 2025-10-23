@@ -47,8 +47,8 @@ export interface Folder {
     parent_id: string | null;
     name: string;
     description: string | null;
-    path: string; // Hierarchical path (e.g., "Parent/Child/Grandchild")
-    depth: number;
+    route: string; // Hierarchical route (e.g., "Parent/Child/Grandchild")
+    level: number;
     order: number;
     created_by: string;
     updated_by: string;
