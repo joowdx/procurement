@@ -16,8 +16,8 @@ return new class extends Migration
             $table->ulid('parent_id')->nullable();
             $table->string('name');
             $table->text('description')->nullable();
-            $table->string('path');
-            $table->integer('depth')->default(0);
+            $table->string('route');
+            $table->integer('level')->default(0);
             $table->integer('order')->default(0);
             $table->ulid('created_by');
             $table->ulid('updated_by');
@@ -34,7 +34,7 @@ return new class extends Migration
             $table->foreign('deleted_by')->references('id')->on('users')->onDelete('set null');
 
             $table->index('parent_id');
-            $table->index('path');
+            $table->index('route');
             $table->index('created_by');
 
             // Unique constraint: folder names must be unique within the same parent

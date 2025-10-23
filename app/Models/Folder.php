@@ -25,8 +25,8 @@ class Folder extends Model
         'parent_id',
         'name',
         'description',
-        'path',
-        'depth',
+        'route',
+        'level',
         'order',
         'created_by',
         'updated_by',
@@ -42,7 +42,7 @@ class Folder extends Model
     protected function casts(): array
     {
         return [
-            'depth' => 'integer',
+            'level' => 'integer',
             'order' => 'integer',
             'created_at' => 'datetime',
             'updated_at' => 'datetime',
@@ -57,12 +57,12 @@ class Folder extends Model
     protected static function booted(): void
     {
         static::creating(function (Folder $folder) {
-            $folder->path = static::buildPath($folder);
+            $folder->route = static::buildRoute($folder);
         });
 
         static::updating(function (Folder $folder) {
             if ($folder->isDirty(['name', 'parent_id'])) {
-                $folder->path = static::buildPath($folder);
+                $folder->route = static::buildRoute($folder);
             }
         });
 
@@ -73,27 +73,20 @@ class Folder extends Model
 
             $folder->deleted_by = Auth::id();
             $folder->saveQuietly();
-
-            // Soft delete all descendants
-            $folder->descendants()->each(function (Folder $descendant) {
-                $descendant->deleted_by = Auth::id();
-                $descendant->saveQuietly();
-                $descendant->delete();
-            });
         });
 
         static::updated(function (Folder $folder) {
             // If name or parent changed, update all descendants
             if ($folder->wasChanged(['name', 'parent_id'])) {
-                static::updateDescendantsPaths($folder);
+                static::updateDescendantsRoutes($folder);
             }
         });
     }
 
     /**
-     * Build hierarchical path from parent relationship.
+     * Build hierarchical route from parent relationship.
      */
-    protected static function buildPath(Folder $folder): string
+    protected static function buildRoute(Folder $folder): string
     {
         $parts = [$folder->name];
         $parent = $folder->parent;
@@ -107,18 +100,18 @@ class Folder extends Model
     }
 
     /**
-     * Update path for all descendants when folder name changes.
+     * Update route for all descendants when folder name changes.
      */
-    protected static function updateDescendantsPaths(Folder $folder): void
+    protected static function updateDescendantsRoutes(Folder $folder): void
     {
         $descendants = Folder::where('parent_id', $folder->id)->get();
 
         foreach ($descendants as $descendant) {
-            $descendant->path = static::buildPath($descendant);
+            $descendant->route = static::buildRoute($descendant);
             $descendant->saveQuietly();
 
             // Recursively update their descendants
-            static::updateDescendantsPaths($descendant);
+            static::updateDescendantsRoutes($descendant);
         }
     }
 
@@ -136,6 +129,16 @@ class Folder extends Model
     public function children(): HasMany
     {
         return $this->hasMany(Folder::class, 'parent_id')->orderBy('order');
+    }
+
+    /**
+     * Scope to exclude folders with deleted ancestors.
+     */
+    public function scopeWithoutDeletedAncestors($query)
+    {
+        return $query->whereDoesntHave('ancestors', function ($q) {
+            $q->withTrashed()->whereNotNull('deleted_at');
+        });
     }
 
     /**
