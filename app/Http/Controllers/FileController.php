@@ -7,6 +7,7 @@ use App\Http\Requests\Files\StoreFileRequest;
 use App\Http\Requests\Files\UpdateFileRequest;
 use App\Models\File;
 use App\Models\Folder;
+use App\Models\Placement;
 use App\Models\Version;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -67,12 +68,72 @@ class FileController extends Controller
 
         // Handle based on disk type
         if ($disk === 'external') {
-            // External file - no upload needed
-            $hash = hash('sha256', $validated['path']);
+            // External file - fetch metadata without storing locally
             $path = $validated['path'];
-            $size = 0;
-            $type = 'application/octet-stream';
-            $extension = pathinfo(parse_url($path, PHP_URL_PATH), PATHINFO_EXTENSION) ?: 'url';
+
+            try {
+                // Download file to temporary location to calculate hash using cURL
+                $tempFile = tempnam(sys_get_temp_dir(), 'ext_file_');
+
+                $ch = curl_init($path);
+                $fp = fopen($tempFile, 'wb');
+                curl_setopt($ch, CURLOPT_FILE, $fp);
+                curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+                curl_setopt($ch, CURLOPT_TIMEOUT, 60);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+
+                $result = curl_exec($ch);
+                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+                fclose($fp);
+
+                if (! $result || $httpCode !== 200) {
+                    unlink($tempFile);
+
+                    return redirect()->back()->withErrors([
+                        'path' => 'Unable to download the external file (HTTP '.$httpCode.').',
+                    ]);
+                }
+
+                // Calculate hash and size
+                $hash = hash_file('sha256', $tempFile);
+                $size = filesize($tempFile);
+
+                // Get MIME type from downloaded content
+                $finfo = finfo_open(FILEINFO_MIME_TYPE);
+                $type = finfo_file($finfo, $tempFile) ?: 'application/octet-stream';
+                finfo_close($finfo);
+
+                // Clean up temp file
+                unlink($tempFile);
+
+                // Get extension from URL or MIME type
+                $extension = pathinfo(parse_url($path, PHP_URL_PATH), PATHINFO_EXTENSION);
+                if (! $extension) {
+                    // Fallback: derive from MIME type
+                    $mimeToExt = [
+                        'application/pdf' => 'pdf',
+                        'application/msword' => 'doc',
+                        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
+                        'application/vnd.ms-excel' => 'xls',
+                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => 'xlsx',
+                    ];
+                    $extension = $mimeToExt[$type] ?? 'bin';
+                }
+
+                // Check if file with same hash already exists
+                $existingVersion = Version::where('hash', $hash)->first();
+                if ($existingVersion) {
+                    return redirect()->back()->withErrors([
+                        'path' => 'A file with identical content already exists in the system.',
+                    ]);
+                }
+            } catch (\Exception $e) {
+                return redirect()->back()->withErrors([
+                    'path' => 'Error processing external file: '.$e->getMessage(),
+                ]);
+            }
         } else {
             // Local file - handle upload
             $uploadedFile = $request->file('file');
@@ -118,18 +179,20 @@ class FileController extends Controller
 
         // Attach to folder if specified (single folder from folder page)
         if ($validated['folder_id'] ?? null) {
-            $file->folders()->attach($validated['folder_id'], [
-                'order' => $file->placements()->where('folder_id', $validated['folder_id'])->max('order') + 1,
-                'created_at' => now(),
+            Placement::create([
+                'file_id' => $file->id,
+                'folder_id' => $validated['folder_id'],
+                'order' => Placement::where('folder_id', $validated['folder_id'])->max('order') + 1,
             ]);
         }
 
         // Attach to multiple folders if specified (from files page)
         if (! empty($validated['folder_ids'])) {
             foreach ($validated['folder_ids'] as $folderId) {
-                $file->folders()->attach($folderId, [
-                    'order' => $file->placements()->where('folder_id', $folderId)->max('order') + 1,
-                    'created_at' => now(),
+                Placement::create([
+                    'file_id' => $file->id,
+                    'folder_id' => $folderId,
+                    'order' => Placement::where('folder_id', $folderId)->max('order') + 1,
                 ]);
             }
         }
@@ -174,8 +237,8 @@ class FileController extends Controller
         }
 
         $validated = $request->validated();
-        $disk = $validated['disk'] ?? 'local';
 
+        // Update basic info first
         $file->updated_by = Auth::id();
 
         if (isset($validated['name'])) {
@@ -186,26 +249,86 @@ class FileController extends Controller
             $file->description = $validated['description'];
         }
 
+        // Save name and description changes immediately
+        $file->save();
+
         // Handle file replacement
         $hasNewVersion = false;
 
-        if ($disk === 'external' && isset($validated['path'])) {
-            // External file update
-            $hash = hash('sha256', $validated['path']);
+        if (isset($validated['path']) && ! empty($validated['path'])) {
+            // External file replacement
+            $disk = 'external';
+            // External file - fetch metadata without storing locally
+            $path = $validated['path'];
 
-            if ($file->hash === $hash) {
+            try {
+                // Download file to temporary location to calculate hash using cURL
+                $tempFile = tempnam(sys_get_temp_dir(), 'ext_file_');
+
+                $ch = curl_init($path);
+                $fp = fopen($tempFile, 'wb');
+                curl_setopt($ch, CURLOPT_FILE, $fp);
+                curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+                curl_setopt($ch, CURLOPT_TIMEOUT, 60);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+
+                $result = curl_exec($ch);
+                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+                fclose($fp);
+
+                if (! $result || $httpCode !== 200) {
+                    unlink($tempFile);
+
+                    return redirect()->back()->withErrors([
+                        'path' => 'Unable to download the external file (HTTP '.$httpCode.').',
+                    ]);
+                }
+
+                // Calculate hash and size
+                $hash = hash_file('sha256', $tempFile);
+                $size = filesize($tempFile);
+
+                if ($file->hash === $hash) {
+                    unlink($tempFile);
+
+                    return redirect()->back()->withErrors([
+                        'file' => 'This URL is identical to the current version.',
+                    ]);
+                }
+
+                // Get MIME type from downloaded content
+                $finfo = finfo_open(FILEINFO_MIME_TYPE);
+                $type = finfo_file($finfo, $tempFile) ?: 'application/octet-stream';
+                finfo_close($finfo);
+
+                // Clean up temp file
+                unlink($tempFile);
+
+                // Get extension from URL or MIME type
+                $extension = pathinfo(parse_url($path, PHP_URL_PATH), PATHINFO_EXTENSION);
+                if (! $extension) {
+                    // Fallback: derive from MIME type
+                    $mimeToExt = [
+                        'application/pdf' => 'pdf',
+                        'application/msword' => 'doc',
+                        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
+                        'application/vnd.ms-excel' => 'xls',
+                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => 'xlsx',
+                    ];
+                    $extension = $mimeToExt[$type] ?? 'bin';
+                }
+            } catch (\Exception $e) {
                 return redirect()->back()->withErrors([
-                    'file' => 'This URL is identical to the current version.',
+                    'path' => 'Error processing external file: '.$e->getMessage(),
                 ]);
             }
 
-            $path = $validated['path'];
-            $size = 0;
-            $type = 'application/octet-stream';
-            $extension = pathinfo(parse_url($path, PHP_URL_PATH), PATHINFO_EXTENSION) ?: 'url';
             $hasNewVersion = true;
         } elseif ($request->hasFile('file')) {
-            // Local file update
+            // Local file replacement
+            $disk = 'local';
             $uploadedFile = $request->file('file');
             $hash = hash_file('sha256', $uploadedFile->getRealPath());
 
@@ -236,11 +359,15 @@ class FileController extends Controller
                 'created_by' => Auth::id(),
             ]);
 
+            // Clear the cached version relationship so it reloads fresh
+            $file->unsetRelation('version');
+            $file->unsetRelation('versions');
+
+            // Update file type and extension
             $file->type = $type;
             $file->extension = $extension;
+            $file->save();
         }
-
-        $file->save();
 
         return redirect()->back()->with('success', 'File updated successfully.');
     }
@@ -274,12 +401,36 @@ class FileController extends Controller
             abort(404, 'File version not found.');
         }
 
-        // Increment download count
-        $version->increment('downloads');
-
         if ($version->disk === 'external') {
-            return redirect($version->path);
+            // Verify external URL is reachable before redirecting
+            try {
+                $ch = curl_init($version->path);
+                curl_setopt($ch, CURLOPT_NOBODY, true);
+                curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+                curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+                curl_exec($ch);
+                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+
+                if ($httpCode !== 200) {
+                    abort(404, 'External file is not accessible (HTTP '.$httpCode.').');
+                }
+            } catch (\Exception $e) {
+                abort(404, 'External file is not reachable.');
+            }
+
+            // Increment download count only after verification
+            $version->increment('downloads');
+
+            // Redirect to external URL
+            return redirect()->away($version->path);
         }
+
+        // Increment download count for local files
+        $version->increment('downloads');
 
         return Storage::disk($version->disk)->download($version->path, $file->name.'.'.$file->extension);
     }
