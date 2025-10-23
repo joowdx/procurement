@@ -18,10 +18,14 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // Folder routes
     Route::post('folders/reorder', [\App\Http\Controllers\FolderController::class, 'reorder'])
         ->name('folders.reorder');
-    Route::resource('folders', \App\Http\Controllers\FolderController::class);
+    Route::post('folders/{id}/restore', [\App\Http\Controllers\FolderController::class, 'restore'])
+        ->name('folders.restore');
+    Route::resource('folders', \App\Http\Controllers\FolderController::class)
+        ->withTrashed(['show', 'destroy']);
 
     // File routes
-    Route::resource('files', \App\Http\Controllers\FileController::class);
+    Route::resource('files', \App\Http\Controllers\FileController::class)
+        ->withTrashed(['destroy']);
     Route::get('files/{file}/download', [\App\Http\Controllers\FileController::class, 'download'])
         ->name('files.download');
     Route::get('files/{file}/preview', [\App\Http\Controllers\FileController::class, 'preview'])

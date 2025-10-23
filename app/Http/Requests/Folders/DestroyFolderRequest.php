@@ -22,6 +22,27 @@ class DestroyFolderRequest extends FormRequest
      */
     public function rules(): array
     {
+        $folder = $this->route('folder');
+
+        // If folder is trashed, require password for force delete
+        if ($folder && $folder->trashed()) {
+            return [
+                'current_password' => ['required', 'string', 'current_password'],
+            ];
+        }
+
+        // No validation needed for soft delete
         return [];
+    }
+
+    /**
+     * Get custom messages for validator errors.
+     */
+    public function messages(): array
+    {
+        return [
+            'current_password.required' => 'Your password is required to permanently delete this folder.',
+            'current_password.current_password' => 'The provided password is incorrect.',
+        ];
     }
 }

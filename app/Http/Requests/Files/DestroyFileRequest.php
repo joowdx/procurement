@@ -12,10 +12,7 @@ class DestroyFileRequest extends FormRequest
      */
     public function authorize(): bool
     {
-        $file = $this->route('file');
-
-        // User must be authenticated and file must not be locked
-        return Auth::check() && ! $file->locked;
+        return Auth::check();
     }
 
     /**
@@ -25,20 +22,27 @@ class DestroyFileRequest extends FormRequest
      */
     public function rules(): array
     {
+        $file = $this->route('file');
+
+        // If file is trashed, require password for force delete
+        if ($file && $file->trashed()) {
+            return [
+                'current_password' => ['required', 'string', 'current_password'],
+            ];
+        }
+
+        // No validation needed for soft delete
         return [];
     }
 
     /**
-     * Get the error messages for authorization failures.
+     * Get custom messages for validator errors.
      */
-    public function failedAuthorization()
+    public function messages(): array
     {
-        $file = $this->route('file');
-
-        if ($file && $file->locked) {
-            abort(403, 'This file is locked and cannot be deleted.');
-        }
-
-        parent::failedAuthorization();
+        return [
+            'current_password.required' => 'Your password is required to permanently delete this file.',
+            'current_password.current_password' => 'The provided password is incorrect.',
+        ];
     }
 }
