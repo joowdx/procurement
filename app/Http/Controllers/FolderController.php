@@ -152,24 +152,12 @@ class FolderController extends Controller
             'placements',
         ]);
 
-        // Recursively load all parent relationships for breadcrumbs
-        $this->loadAncestors($folder);
+        // Load all ancestors using the package
+        $folder->load('ancestors');
 
         return Inertia::render('folders/show', [
             'folder' => $folder,
         ]);
-    }
-
-    /**
-     * Recursively load all parent relationships.
-     */
-    protected function loadAncestors(Folder $folder): void
-    {
-        $folder->load('parent');
-
-        if ($folder->parent) {
-            $this->loadAncestors($folder->parent);
-        }
     }
 
     /**

@@ -26,9 +26,6 @@ interface CreateFolderFormData {
     name: string;
     description: string;
     parent_id: string | null;
-    filter?: string;
-    search?: string;
-    max_depth?: number;
 }
 
 export function CreateFolderDialog({

@@ -10,10 +10,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Facades\Auth;
+use Staudenmeir\LaravelAdjacencyList\Eloquent\HasRecursiveRelationships;
 
 class Folder extends Model
 {
-    use HasFactory, HasUlids, SoftDeletes;
+    use HasFactory, HasRecursiveRelationships, HasUlids, SoftDeletes;
 
     /**
      * The attributes that are mass assignable.
@@ -72,6 +73,13 @@ class Folder extends Model
 
             $folder->deleted_by = Auth::id();
             $folder->saveQuietly();
+
+            // Soft delete all descendants
+            $folder->descendants()->each(function (Folder $descendant) {
+                $descendant->deleted_by = Auth::id();
+                $descendant->saveQuietly();
+                $descendant->delete();
+            });
         });
 
         static::updated(function (Folder $folder) {
@@ -128,14 +136,6 @@ class Folder extends Model
     public function children(): HasMany
     {
         return $this->hasMany(Folder::class, 'parent_id')->orderBy('order');
-    }
-
-    /**
-     * Get all descendant folders recursively.
-     */
-    public function descendants(): HasMany
-    {
-        return $this->children()->with('descendants');
     }
 
     /**
