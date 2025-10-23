@@ -30,7 +30,7 @@ interface FileListProps {
 }
 
 export function FileList({ files, showDeleted = false }: FileListProps) {
-    const [replaceFile, setReplaceFile] = useState<{ id: string; name: string } | null>(null);
+    const [replaceFile, setReplaceFile] = useState<File | null>(null);
     const [deleteFile, setDeleteFile] = useState<{ id: string; name: string } | null>(null);
     const [previewFile, setPreviewFile] = useState<File | null>(null);
     const [historyFile, setHistoryFile] = useState<File | null>(null);
@@ -45,7 +45,7 @@ export function FileList({ files, showDeleted = false }: FileListProps) {
                         showDeleted={showDeleted}
                         onPreview={() => setPreviewFile(file)}
                         onHistory={() => setHistoryFile(file)}
-                        onReplace={() => setReplaceFile({ id: file.id, name: file.name })}
+                        onReplace={() => setReplaceFile(file)}
                         onDelete={() => setDeleteFile({ id: file.id, name: file.name })}
                     />
                 ))}

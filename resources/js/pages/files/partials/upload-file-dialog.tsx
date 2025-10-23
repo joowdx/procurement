@@ -43,7 +43,7 @@ interface UploadFileDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     folderId?: string | null;
-    fileToReplace?: { id: string; name: string } | null;
+    fileToReplace?: any | null;
     showFolderSelector?: boolean;
 }
 
@@ -81,7 +81,7 @@ export function UploadFileDialog({
 
     const { data, setData, post, put, processing, errors, reset, clearErrors } =
         useForm<UploadFileFormData>({
-            name: fileToReplace?.name || '',
+            name: '',
             description: '',
             disk: 'local',
             file: null,
@@ -89,6 +89,24 @@ export function UploadFileDialog({
             folder_id: folderId || null,
             folder_ids: [],
         });
+
+    // Pre-fill form when replacing a file
+    useEffect(() => {
+        if (fileToReplace && open) {
+            setData({
+                name: fileToReplace.name || '',
+                description: fileToReplace.description || '',
+                disk: fileToReplace.version?.disk || 'local',
+                file: null,
+                path: fileToReplace.version?.disk === 'external' ? fileToReplace.version?.path || '' : '',
+                folder_id: folderId || null,
+                folder_ids: [],
+            });
+        } else if (open && !fileToReplace) {
+            // Reset for new upload
+            reset();
+        }
+    }, [fileToReplace, open]);
 
     // Fetch folders for selection with debounce
     useEffect(() => {
@@ -162,8 +180,12 @@ export function UploadFileDialog({
         }
 
         if (isReplaceMode && fileToReplace) {
+            // For file uploads (local disk), use forceFormData
+            // For external URLs, use regular PUT
+            const hasFileUpload = data.disk === 'local' && data.file;
+            
             put(files.update.url(fileToReplace.id), {
-                forceFormData: true,
+                forceFormData: hasFileUpload,
                 onSuccess: () => {
                     reset();
                     setSelectedFileName('');
@@ -225,7 +247,7 @@ export function UploadFileDialog({
                 </DialogHeader>
 
                 <form onSubmit={handleSubmit} className="overflow-hidden">
-                    <div className="space-y-4 py-4 overflow-hidden">
+                    <div className="space-y-4 py-4 px-1 overflow-hidden">
                         <AlertError errors={errors} />
 
                         <div className="space-y-2">
@@ -235,6 +257,7 @@ export function UploadFileDialog({
                             <Select
                                 value={data.disk}
                                 onValueChange={(value) => setData('disk', value as 'local' | 'external')}
+                                disabled={isReplaceMode}
                             >
                                 <SelectTrigger>
                                     <SelectValue placeholder="Select disk" />

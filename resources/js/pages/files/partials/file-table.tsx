@@ -23,7 +23,7 @@ interface FileTableProps {
 }
 
 export function FileTable({ files: fileList, showDeleted = false }: FileTableProps) {
-    const [replaceFile, setReplaceFile] = useState<{ id: string; name: string } | null>(null);
+    const [replaceFile, setReplaceFile] = useState<any | null>(null);
     const [deleteFile, setDeleteFile] = useState<{ id: string; name: string } | null>(null);
     const [previewFile, setPreviewFile] = useState<File | null>(null);
     const [historyFile, setHistoryFile] = useState<File | null>(null);
@@ -165,7 +165,7 @@ export function FileTable({ files: fileList, showDeleted = false }: FileTablePro
                                                         History
                                                     </DropdownMenuItem>
                                                     <DropdownMenuItem
-                                                        onClick={() => setReplaceFile({ id: file.id, name: file.name })}
+                                                        onClick={() => setReplaceFile(file)}
                                                     >
                                                         <RefreshCw className="mr-2 h-4 w-4" />
                                                         Replace
