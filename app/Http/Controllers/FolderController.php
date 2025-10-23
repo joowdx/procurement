@@ -121,9 +121,8 @@ class FolderController extends Controller
                 ->with('success', 'Folder created successfully.');
         }
 
-        // Otherwise redirect to folders index
-        return redirect()->route('folders.index')
-            ->with('success', 'Folder created successfully.');
+        // Otherwise redirect back (preserves filters)
+        return redirect()->back()->with('success', 'Folder created successfully.');
     }
 
     /**
@@ -209,7 +208,7 @@ class FolderController extends Controller
     {
         $folder->delete();
 
-        return redirect()->route('folders.index')->with('success', 'Folder deleted successfully.');
+        return redirect()->back()->with('success', 'Folder deleted successfully.');
     }
 
     /**

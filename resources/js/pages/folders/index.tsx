@@ -276,7 +276,13 @@ export default function FoldersIndex({ folders: initialFolders, filter, search, 
                     onOpenChange={(open) => !open && setDeleteFolder(null)}
                     onConfirm={() => {
                         if (deleteFolder) {
-                            router.delete(folders.destroy.url(deleteFolder.id));
+                            router.delete(folders.destroy.url(deleteFolder.id), {
+                                data: {
+                                    filter,
+                                    search: searchQuery,
+                                    max_depth: maxDepth,
+                                },
+                            });
                             setDeleteFolder(null);
                         }
                     }}
