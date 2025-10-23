@@ -20,13 +20,13 @@ class FolderController extends Controller
     public function index(Request $request)
     {
         // API request for folder selection (file upload)
-        if ($request->wantsJson() && !$request->has('filter')) {
+        if ($request->wantsJson() && ! $request->has('filter')) {
             $query = Folder::query();
-            
+
             if ($search = $request->get('search')) {
                 $query->where('name', 'like', "%{$search}%");
             }
-            
+
             $folders = $query->orderBy('path')
                 ->orderBy('order')
                 ->get()
@@ -37,17 +37,17 @@ class FolderController extends Controller
                         'path' => $folder->path,
                     ];
                 });
-            
+
             return response()->json($folders);
         }
 
         // Regular page request with filters
         $filter = $request->get('filter');
         $search = $request->get('search');
-        
+
         // Calculate maximum depth in database
         $maxDepthAvailable = Folder::max('depth') ?? 0;
-        
+
         // Set default max_depth: 3 if available depth > 3, otherwise use max available
         $defaultMaxDepth = $maxDepthAvailable > 3 ? 3 : $maxDepthAvailable;
         $maxDepth = $request->get('max_depth', $defaultMaxDepth);
@@ -137,7 +137,7 @@ class FolderController extends Controller
                 ->withCount('children')
                 ->orderBy('order')
                 ->get();
-            
+
             return response()->json($children);
         }
 
@@ -152,7 +152,7 @@ class FolderController extends Controller
             },
             'placements',
         ]);
-        
+
         // Recursively load all parent relationships for breadcrumbs
         $this->loadAncestors($folder);
 
@@ -167,7 +167,7 @@ class FolderController extends Controller
     protected function loadAncestors(Folder $folder): void
     {
         $folder->load('parent');
-        
+
         if ($folder->parent) {
             $this->loadAncestors($folder->parent);
         }
@@ -232,4 +232,3 @@ class FolderController extends Controller
         return back();
     }
 }
-

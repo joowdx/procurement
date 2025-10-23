@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -33,7 +32,6 @@ class Folder extends Model
         'deactivated_by',
         'deactivated_at',
     ];
-
 
     /**
      * Get the attributes that should be cast.
@@ -91,12 +89,12 @@ class Folder extends Model
     {
         $parts = [$folder->name];
         $parent = $folder->parent;
-        
+
         while ($parent) {
             array_unshift($parts, $parent->name);
             $parent = $parent->parent;
         }
-        
+
         return implode('/', $parts);
     }
 
@@ -106,11 +104,11 @@ class Folder extends Model
     protected static function updateDescendantsPaths(Folder $folder): void
     {
         $descendants = Folder::where('parent_id', $folder->id)->get();
-        
+
         foreach ($descendants as $descendant) {
             $descendant->path = static::buildPath($descendant);
             $descendant->saveQuietly();
-            
+
             // Recursively update their descendants
             static::updateDescendantsPaths($descendant);
         }
@@ -189,6 +187,4 @@ class Folder extends Model
     {
         return $this->hasMany(Placement::class);
     }
-
 }
-

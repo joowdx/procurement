@@ -122,7 +122,7 @@ class FileController extends Controller
         }
 
         // Attach to multiple folders if specified (from files page)
-        if (!empty($validated['folder_ids'])) {
+        if (! empty($validated['folder_ids'])) {
             foreach ($validated['folder_ids'] as $folderId) {
                 $file->folders()->attach($folderId, [
                     'order' => $file->placements()->where('folder_id', $folderId)->max('order') + 1,
@@ -158,7 +158,7 @@ class FileController extends Controller
             $file->restore();
             $file->deleted_by = null;
             $file->save();
-            
+
             return redirect()->back()->with('success', 'File restored successfully.');
         }
 
@@ -185,11 +185,11 @@ class FileController extends Controller
 
         // Handle file replacement
         $hasNewVersion = false;
-        
+
         if ($disk === 'external' && isset($validated['path'])) {
             // External file update
             $hash = hash('sha256', $validated['path']);
-            
+
             if ($file->hash === $hash) {
                 return redirect()->back()->withErrors([
                     'file' => 'This URL is identical to the current version.',
@@ -259,7 +259,7 @@ class FileController extends Controller
     {
         $version = $file->version;
 
-        if (!$version) {
+        if (! $version) {
             abort(404, 'File version not found.');
         }
 
@@ -280,7 +280,7 @@ class FileController extends Controller
     {
         $version = $file->version;
 
-        if (!$version) {
+        if (! $version) {
             abort(404, 'File version not found.');
         }
 
@@ -294,4 +294,3 @@ class FileController extends Controller
         ]);
     }
 }
-

@@ -13,9 +13,9 @@ class DestroyFileRequest extends FormRequest
     public function authorize(): bool
     {
         $file = $this->route('file');
-        
+
         // User must be authenticated and file must not be locked
-        return Auth::check() && !$file->locked;
+        return Auth::check() && ! $file->locked;
     }
 
     /**
@@ -34,11 +34,11 @@ class DestroyFileRequest extends FormRequest
     public function failedAuthorization()
     {
         $file = $this->route('file');
-        
+
         if ($file && $file->locked) {
             abort(403, 'This file is locked and cannot be deleted.');
         }
-        
+
         parent::failedAuthorization();
     }
 }

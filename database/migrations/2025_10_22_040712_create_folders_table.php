@@ -36,7 +36,7 @@ return new class extends Migration
             $table->index('parent_id');
             $table->index('path');
             $table->index('created_by');
-            
+
             // Unique constraint: folder names must be unique within the same parent
             // Enforced in migration: 2025_10_22_081846_add_unique_constraint_to_folders_name.php
             // $table->unique(['name', 'parent_id'], 'folders_name_parent_id_unique');

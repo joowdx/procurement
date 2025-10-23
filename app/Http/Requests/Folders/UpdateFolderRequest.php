@@ -38,13 +38,14 @@ class UpdateFolderRequest extends FormRequest
                 'string',
                 'max:255',
                 Rule::unique('folders', 'name')
-                    ->where(function ($query) use ($folderId) {
+                    ->where(function ($query) {
                         $folder = $this->route('folder');
                         $parentId = $this->input('parent_id', $folder->parent_id);
+
                         return $query->where('parent_id', $parentId)
                             ->whereNull('deleted_at');
                     })
-                    ->ignore($folderId)
+                    ->ignore($folderId),
             ],
             'description' => ['nullable', 'string', 'max:1000'],
         ];

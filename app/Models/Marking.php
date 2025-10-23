@@ -53,7 +53,7 @@ class Marking extends Pivot
     protected static function booted(): void
     {
         static::creating(function (Marking $marking) {
-            if (!$marking->created_at) {
+            if (! $marking->created_at) {
                 $marking->created_at = now();
             }
         });
@@ -75,4 +75,3 @@ class Marking extends Pivot
         return $this->belongsTo(Tag::class);
     }
 }
-

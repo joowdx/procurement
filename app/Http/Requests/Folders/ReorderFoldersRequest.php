@@ -29,7 +29,7 @@ class ReorderFoldersRequest extends FormRequest
             'folders.*.order' => ['required', 'integer', 'min:1'],
         ];
     }
-    
+
     /**
      * Get custom messages for validator errors.
      */

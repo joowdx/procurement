@@ -55,7 +55,7 @@ class Placement extends Pivot
     protected static function booted(): void
     {
         static::creating(function (Placement $placement) {
-            if (!$placement->created_at) {
+            if (! $placement->created_at) {
                 $placement->created_at = now();
             }
         });
@@ -77,4 +77,3 @@ class Placement extends Pivot
         return $this->belongsTo(Folder::class);
     }
 }
-

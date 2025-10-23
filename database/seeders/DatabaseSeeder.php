@@ -15,9 +15,9 @@ class DatabaseSeeder extends Seeder
     {
         if (User::where('email', 'admin@example.com')->doesntExist()) {
             User::factory()
-            ->withoutTwoFactor()
-            ->administratorAccount()
-            ->create();
+                ->withoutTwoFactor()
+                ->administratorAccount()
+                ->create();
         }
 
     }

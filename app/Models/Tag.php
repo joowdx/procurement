@@ -64,4 +64,3 @@ class Tag extends Model
         return $this->hasMany(Marking::class);
     }
 }
-

@@ -33,7 +33,7 @@ class StoreFolderRequest extends FormRequest
                     ->where(function ($query) {
                         return $query->where('parent_id', $this->input('parent_id'))
                             ->whereNull('deleted_at');
-                    })
+                    }),
             ],
             'description' => ['nullable', 'string', 'max:1000'],
         ];

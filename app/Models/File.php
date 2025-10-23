@@ -177,7 +177,7 @@ class File extends Model
             get: function () {
                 $version = $this->version;
 
-                if (!$version) {
+                if (! $version) {
                     return null;
                 }
 
@@ -211,4 +211,3 @@ class File extends Model
         );
     }
 }
-
