@@ -8,17 +8,20 @@ use App\Http\Requests\Files\UpdateFileRequest;
 use App\Models\File;
 use App\Models\Folder;
 use App\Models\Version;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
+use Inertia\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class FileController extends Controller
 {
     /**
      * Display a listing of files.
      */
-    public function index(Request $request)
+    public function index(Request $request): Response
     {
         $filter = $request->get('filter');
 
@@ -57,7 +60,7 @@ class FileController extends Controller
     /**
      * Store a newly created file.
      */
-    public function store(StoreFileRequest $request)
+    public function store(StoreFileRequest $request): RedirectResponse
     {
         $validated = $request->validated();
         $disk = $validated['disk'];
@@ -137,7 +140,7 @@ class FileController extends Controller
     /**
      * Display the specified file.
      */
-    public function show(File $file)
+    public function show(File $file): Response
     {
         $file->load(['version', 'versions', 'folders', 'tags', 'comments.creator']);
         $file->loadSum('versions', 'downloads');
@@ -150,7 +153,7 @@ class FileController extends Controller
     /**
      * Update the specified file.
      */
-    public function update(UpdateFileRequest $request, $id)
+    public function update(UpdateFileRequest $request, string $id): RedirectResponse
     {
         // Handle restore for soft-deleted files
         if ($request->has('restore')) {
@@ -244,9 +247,17 @@ class FileController extends Controller
 
     /**
      * Remove the specified file.
+     * If already trashed, force delete with password confirmation.
+     * Otherwise, soft delete.
      */
-    public function destroy(DestroyFileRequest $request, File $file)
+    public function destroy(DestroyFileRequest $request, File $file): RedirectResponse
     {
+        if ($file->trashed()) {
+            $file->forceDelete();
+
+            return redirect()->back()->with('success', 'File permanently deleted.');
+        }
+
         $file->delete();
 
         return redirect()->back()->with('success', 'File deleted successfully.');
@@ -255,7 +266,7 @@ class FileController extends Controller
     /**
      * Download the specified file.
      */
-    public function download(File $file)
+    public function download(File $file): StreamedResponse|RedirectResponse
     {
         $version = $file->version;
 
@@ -276,7 +287,7 @@ class FileController extends Controller
     /**
      * Preview the specified file inline.
      */
-    public function preview(File $file)
+    public function preview(File $file): StreamedResponse|RedirectResponse
     {
         $version = $file->version;
 
