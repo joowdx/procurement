@@ -13,6 +13,14 @@
                 "shadcn@latest",
                 "mcp"
             ]
+        },
+        "laravel-boost": {
+            "command": "wsl",
+            "args": [
+                "/usr/bin/php8.4",
+                "/home/zack/posting/artisan",
+                "boost:mcp"
+            ]
         }
     }
 }
