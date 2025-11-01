@@ -13,6 +13,7 @@ return new class extends Migration
     {
         Schema::create('files', function (Blueprint $table) {
             $table->ulid('id')->primary();
+            $table->ulid('workspace_id');
             $table->string('name');
             $table->text('description')->nullable();
             $table->string('type'); // MIME type
@@ -25,10 +26,12 @@ return new class extends Migration
             $table->timestamps();
             $table->softDeletes();
 
+            $table->foreign('workspace_id')->references('id')->on('workspaces')->onDelete('cascade');
             $table->foreign('created_by')->references('id')->on('users')->onDelete('cascade');
             $table->foreign('updated_by')->references('id')->on('users')->onDelete('cascade');
             $table->foreign('deleted_by')->references('id')->on('users')->onDelete('set null');
 
+            $table->index('workspace_id');
             $table->index('created_by');
             $table->index('type');
             $table->index('name');

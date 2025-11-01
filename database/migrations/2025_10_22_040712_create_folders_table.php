@@ -13,6 +13,7 @@ return new class extends Migration
     {
         Schema::create('folders', function (Blueprint $table) {
             $table->ulid('id')->primary();
+            $table->ulid('workspace_id');
             $table->ulid('parent_id')->nullable();
             $table->string('name');
             $table->text('description')->nullable();
@@ -27,12 +28,14 @@ return new class extends Migration
             $table->timestamp('deactivated_at')->nullable();
             $table->softDeletes();
 
+            $table->foreign('workspace_id')->references('id')->on('workspaces')->onDelete('cascade');
             $table->foreign('parent_id')->references('id')->on('folders')->onDelete('cascade');
             $table->foreign('created_by')->references('id')->on('users')->onDelete('cascade');
             $table->foreign('updated_by')->references('id')->on('users')->onDelete('cascade');
             $table->foreign('deactivated_by')->references('id')->on('users')->onDelete('set null');
             $table->foreign('deleted_by')->references('id')->on('users')->onDelete('set null');
 
+            $table->index('workspace_id');
             $table->index('parent_id');
             $table->index('route');
             $table->index('created_by');

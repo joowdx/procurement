@@ -9,6 +9,7 @@ use App\Models\File;
 use App\Models\Folder;
 use App\Models\Placement;
 use App\Models\Version;
+use App\Models\Workspace;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -24,6 +25,18 @@ class FileController extends Controller
      */
     public function index(Request $request): Response
     {
+        $workspaceId = $request->get('workspace_id');
+
+        // Check workspace access if workspace_id is provided
+        if ($workspaceId) {
+            $workspace = Workspace::findOrFail($workspaceId);
+
+            // Check if user has access to this workspace
+            if (! $this->hasWorkspaceAccess(Auth::user(), $workspace)) {
+                abort(403, 'You do not have access to this workspace.');
+            }
+        }
+
         $filter = $request->get('filter');
 
         if ($filter === 'unplaced') {
@@ -42,13 +55,19 @@ class FileController extends Controller
                 ->withSum('versions', 'downloads');
         }
 
+        // Filter by workspace if workspace_id is provided
+        if ($workspaceId) {
+            $query->where('workspace_id', $workspaceId);
+        }
+
         $files = $query->orderBy('created_at', 'desc')->paginate(20);
 
-        // Get counts for all filters
+        // Get counts for all filters (filtered by workspace if applicable)
+        $countsQuery = $workspaceId ? File::where('workspace_id', $workspaceId) : File::query();
         $counts = [
-            'all' => File::count(),
-            'unplaced' => File::doesntHave('placements')->count(),
-            'deleted' => File::onlyTrashed()->count(),
+            'all' => (clone $countsQuery)->count(),
+            'unplaced' => (clone $countsQuery)->doesntHave('placements')->count(),
+            'deleted' => (clone $countsQuery)->onlyTrashed()->count(),
         ];
 
         return Inertia::render('files/index', [
@@ -56,6 +75,25 @@ class FileController extends Controller
             'filter' => $filter,
             'counts' => $counts,
         ]);
+    }
+
+    /**
+     * Check if user has access to workspace.
+     */
+    private function hasWorkspaceAccess($user, Workspace $workspace): bool
+    {
+        // Workspace owner always has access
+        if ($workspace->user_id === $user->id) {
+            return true;
+        }
+
+        // Root users have access to all workspaces
+        if ($user->role === 'root') {
+            return true;
+        }
+
+        // Check if user is a member
+        return $user->workspaces()->where('workspaces.id', $workspace->id)->exists();
     }
 
     /**
@@ -72,29 +110,20 @@ class FileController extends Controller
             $path = $validated['path'];
 
             try {
-                // Download file to temporary location to calculate hash using cURL
-                $tempFile = tempnam(sys_get_temp_dir(), 'ext_file_');
+                // Download file using Laravel HTTP client
+                $response = \Illuminate\Support\Facades\Http::timeout(60)
+                    ->withUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+                    ->get($path);
 
-                $ch = curl_init($path);
-                $fp = fopen($tempFile, 'wb');
-                curl_setopt($ch, CURLOPT_FILE, $fp);
-                curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-                curl_setopt($ch, CURLOPT_TIMEOUT, 60);
-                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-                curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-
-                $result = curl_exec($ch);
-                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                curl_close($ch);
-                fclose($fp);
-
-                if (! $result || $httpCode !== 200) {
-                    unlink($tempFile);
-
+                if (! $response->successful()) {
                     return redirect()->back()->withErrors([
-                        'path' => 'Unable to download the external file (HTTP '.$httpCode.').',
+                        'path' => 'Unable to download the external file (HTTP '.$response->status().').',
                     ]);
                 }
+
+                // Save to temporary file for hash calculation
+                $tempFile = tempnam(sys_get_temp_dir(), 'ext_file_');
+                file_put_contents($tempFile, $response->body());
 
                 // Calculate hash and size
                 $hash = hash_file('sha256', $tempFile);
@@ -122,11 +151,13 @@ class FileController extends Controller
                     $extension = $mimeToExt[$type] ?? 'bin';
                 }
 
-                // Check if file with same hash already exists
-                $existingVersion = Version::where('hash', $hash)->first();
+                // Check if file with same hash already exists in this workspace
+                $existingVersion = Version::where('hash', $hash)
+                    ->whereHas('file', fn ($q) => $q->where('workspace_id', $validated['workspace_id']))
+                    ->first();
                 if ($existingVersion) {
                     return redirect()->back()->withErrors([
-                        'path' => 'A file with identical content already exists in the system.',
+                        'path' => 'A file with identical content already exists in this workspace.',
                     ]);
                 }
             } catch (\Exception $e) {
@@ -139,11 +170,13 @@ class FileController extends Controller
             $uploadedFile = $request->file('file');
             $hash = hash_file('sha256', $uploadedFile->getRealPath());
 
-            // Check if file with same hash already exists
-            $existingVersion = Version::where('hash', $hash)->first();
+            // Check if file with same hash already exists in this workspace
+            $existingVersion = Version::where('hash', $hash)
+                ->whereHas('file', fn ($q) => $q->where('workspace_id', $validated['workspace_id']))
+                ->first();
             if ($existingVersion) {
                 return redirect()->back()->withErrors([
-                    'file' => 'This file already exists in the system.',
+                    'file' => 'This file already exists in this workspace.',
                 ]);
             }
 
@@ -157,6 +190,7 @@ class FileController extends Controller
 
         // Create file record
         $file = File::create([
+            'workspace_id' => $validated['workspace_id'],
             'name' => $validated['name'],
             'description' => $validated['description'] ?? null,
             'type' => $type,
@@ -205,6 +239,11 @@ class FileController extends Controller
      */
     public function show(File $file): Response
     {
+        // Check workspace access
+        if ($file->workspace_id && ! $this->hasWorkspaceAccess(Auth::user(), $file->workspace)) {
+            abort(403, 'You do not have access to this workspace.');
+        }
+
         $file->load(['version', 'versions', 'folders', 'tags', 'comments.creator']);
         $file->loadSum('versions', 'downloads');
 
@@ -232,7 +271,7 @@ class FileController extends Controller
 
         if ($file->locked) {
             return redirect()->back()->withErrors([
-                'file' => 'This file is locked and cannot be modified.',
+                'locked' => 'This file is locked and cannot be modified.',
             ]);
         }
 
@@ -262,29 +301,20 @@ class FileController extends Controller
             $path = $validated['path'];
 
             try {
-                // Download file to temporary location to calculate hash using cURL
-                $tempFile = tempnam(sys_get_temp_dir(), 'ext_file_');
+                // Download file using Laravel HTTP client
+                $response = \Illuminate\Support\Facades\Http::timeout(60)
+                    ->withUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+                    ->get($path);
 
-                $ch = curl_init($path);
-                $fp = fopen($tempFile, 'wb');
-                curl_setopt($ch, CURLOPT_FILE, $fp);
-                curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-                curl_setopt($ch, CURLOPT_TIMEOUT, 60);
-                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-                curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-
-                $result = curl_exec($ch);
-                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                curl_close($ch);
-                fclose($fp);
-
-                if (! $result || $httpCode !== 200) {
-                    unlink($tempFile);
-
+                if (! $response->successful()) {
                     return redirect()->back()->withErrors([
-                        'path' => 'Unable to download the external file (HTTP '.$httpCode.').',
+                        'path' => 'Unable to download the external file (HTTP '.$response->status().').',
                     ]);
                 }
+
+                // Save to temporary file for hash calculation
+                $tempFile = tempnam(sys_get_temp_dir(), 'ext_file_');
+                file_put_contents($tempFile, $response->body());
 
                 // Calculate hash and size
                 $hash = hash_file('sha256', $tempFile);
@@ -369,6 +399,23 @@ class FileController extends Controller
             $file->save();
         }
 
+        // Handle folder assignments update
+        if (array_key_exists('folder_ids', $validated)) {
+            // Remove all existing placements
+            $file->placements()->delete();
+
+            // Add new placements
+            if (! empty($validated['folder_ids'])) {
+                foreach ($validated['folder_ids'] as $folderId) {
+                    Placement::create([
+                        'file_id' => $file->id,
+                        'folder_id' => $folderId,
+                        'order' => Placement::where('folder_id', $folderId)->max('order') + 1,
+                    ]);
+                }
+            }
+        }
+
         return redirect()->back()->with('success', 'File updated successfully.');
     }
 
@@ -379,6 +426,12 @@ class FileController extends Controller
      */
     public function destroy(DestroyFileRequest $request, File $file): RedirectResponse
     {
+        if ($file->locked) {
+            return redirect()->back()->withErrors([
+                'locked' => 'This file is locked and cannot be deleted.',
+            ]);
+        }
+
         if ($file->trashed()) {
             $file->forceDelete();
 
@@ -391,10 +444,38 @@ class FileController extends Controller
     }
 
     /**
+     * Restore a soft-deleted file.
+     */
+    public function restore(string $id): RedirectResponse
+    {
+        $file = File::withTrashed()->findOrFail($id);
+
+        // Check workspace access
+        if ($file->workspace_id && ! $this->hasWorkspaceAccess(Auth::user(), $file->workspace)) {
+            abort(403, 'You do not have access to this workspace.');
+        }
+
+        if (! $file->trashed()) {
+            abort(404, 'This file is not deleted.');
+        }
+
+        $file->restore();
+        $file->deleted_by = null;
+        $file->save();
+
+        return redirect()->back()->with('success', 'File restored successfully.');
+    }
+
+    /**
      * Download the specified file.
      */
     public function download(File $file): StreamedResponse|RedirectResponse
     {
+        // Check workspace access
+        if ($file->workspace_id && ! $this->hasWorkspaceAccess(Auth::user(), $file->workspace)) {
+            abort(403, 'You do not have access to this workspace.');
+        }
+
         $version = $file->version;
 
         if (! $version) {
@@ -404,19 +485,10 @@ class FileController extends Controller
         if ($version->disk === 'external') {
             // Verify external URL is reachable before redirecting
             try {
-                $ch = curl_init($version->path);
-                curl_setopt($ch, CURLOPT_NOBODY, true);
-                curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-                curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                $response = \Illuminate\Support\Facades\Http::timeout(10)->head($version->path);
 
-                curl_exec($ch);
-                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                curl_close($ch);
-
-                if ($httpCode !== 200) {
-                    abort(404, 'External file is not accessible (HTTP '.$httpCode.').');
+                if (! $response->successful()) {
+                    abort(404, 'External file is not accessible (HTTP '.$response->status().').');
                 }
             } catch (\Exception $e) {
                 abort(404, 'External file is not reachable.');

@@ -18,7 +18,11 @@ class ListingController extends Controller
         $rootFolders = Folder::withoutDeletedAncestors()
             ->whereNull('parent_id')
             ->orderBy('order')
-            ->get();
+            ->get()
+            ->map(fn ($folder) => [
+                'id' => $folder->id,
+                'name' => $folder->name,
+            ]);
 
         return Inertia::render('listing/index', [
             'rootFolders' => $rootFolders,
@@ -41,10 +45,8 @@ class ListingController extends Controller
         // Load direct files of this folder
         $folder->load(['files.version']);
 
-        // Load all ancestors for breadcrumbs
-        $folder->loadMissing(['ancestors' => function ($query) {
-            $query->withTrashed();
-        }]);
+        // Load active ancestors for breadcrumbs (exclude deleted)
+        $folder->loadMissing(['ancestors']);
 
         // Get all level 0 folders for navigation
         $rootFolders = Folder::withoutDeletedAncestors()

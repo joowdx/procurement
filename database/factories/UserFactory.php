@@ -27,6 +27,7 @@ class UserFactory extends Factory
             'email' => fake()->unique()->safeEmail(),
             'email_verified_at' => now(),
             'password' => static::$password ??= 'password',
+            'role' => 'user',
             'remember_token' => Str::random(10),
             'two_factor_secret' => Str::random(10),
             'two_factor_recovery_codes' => Str::random(10),
@@ -56,8 +57,28 @@ class UserFactory extends Factory
         ]);
     }
 
-    /*
-     * Administrator account
+    /**
+     * Indicate that the user has admin role.
+     */
+    public function admin(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => 'admin',
+        ]);
+    }
+
+    /**
+     * Indicate that the user has root role.
+     */
+    public function root(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => 'root',
+        ]);
+    }
+
+    /**
+     * Administrator account.
      */
     public function administratorAccount(): static
     {
@@ -66,6 +87,7 @@ class UserFactory extends Factory
             'email' => 'admin@example.com',
             'password' => 'password',
             'email_verified_at' => now(),
+            'role' => 'admin',
         ]);
     }
 }

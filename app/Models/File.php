@@ -24,6 +24,7 @@ class File extends Model
      * @var array<int, string>
      */
     protected $fillable = [
+        'workspace_id',
         'name',
         'description',
         'type',
@@ -83,6 +84,14 @@ class File extends Model
             $file->deleted_by = Auth::id();
             $file->saveQuietly();
         });
+    }
+
+    /**
+     * Get the workspace this file belongs to.
+     */
+    public function workspace(): BelongsTo
+    {
+        return $this->belongsTo(Workspace::class);
     }
 
     /**

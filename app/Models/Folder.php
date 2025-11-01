@@ -22,6 +22,7 @@ class Folder extends Model
      * @var array<int, string>
      */
     protected $fillable = [
+        'workspace_id',
         'parent_id',
         'name',
         'description',
@@ -89,11 +90,20 @@ class Folder extends Model
     protected static function buildRoute(Folder $folder): string
     {
         $parts = [$folder->name];
-        $parent = $folder->parent;
 
-        while ($parent) {
-            array_unshift($parts, $parent->name);
-            $parent = $parent->parent;
+        // Use package's ancestors if available (more efficient)
+        if ($folder->exists && $folder->relationLoaded('ancestors')) {
+            $ancestors = $folder->ancestors->sortBy('level');
+            foreach ($ancestors as $ancestor) {
+                array_unshift($parts, $ancestor->name);
+            }
+        } else {
+            // Fallback to manual parent walk (less efficient but works)
+            $parent = $folder->parent;
+            while ($parent) {
+                array_unshift($parts, $parent->name);
+                $parent = $parent->parent;
+            }
         }
 
         return implode('/', $parts);
@@ -107,12 +117,20 @@ class Folder extends Model
         $descendants = Folder::where('parent_id', $folder->id)->get();
 
         foreach ($descendants as $descendant) {
-            $descendant->route = static::buildRoute($descendant);
-            $descendant->saveQuietly();
+            // Use updateQuietly to skip ALL events including updated
+            $descendant->updateQuietly(['route' => static::buildRoute($descendant)]);
 
             // Recursively update their descendants
             static::updateDescendantsRoutes($descendant);
         }
+    }
+
+    /**
+     * Get the workspace this folder belongs to.
+     */
+    public function workspace(): BelongsTo
+    {
+        return $this->belongsTo(Workspace::class);
     }
 
     /**

@@ -13,7 +13,44 @@ class UpdateFolderRequest extends FormRequest
      */
     public function authorize(): bool
     {
-        return Auth::check();
+        if (! Auth::check()) {
+            return false;
+        }
+
+        // Check workspace access for the folder
+        $folder = $this->route('folder');
+        if ($folder && $folder->workspace_id) {
+            $workspace = $folder->workspace;
+            if (! $workspace) {
+                return false;
+            }
+
+            $user = Auth::user();
+
+            // Root users have access to all workspaces
+            if ($user->role === 'root') {
+                return true;
+            }
+
+            // Workspace owner always has access
+            if ($workspace->user_id === $user->id) {
+                return true;
+            }
+
+            // Check if user is a member with folders permission
+            $membership = \App\Models\Membership::where('workspace_id', $workspace->id)
+                ->where('user_id', $user->id)
+                ->first();
+            if (! $membership) {
+                return false;
+            }
+
+            $permissions = $membership->permissions ?? [];
+
+            return $permissions['folders'] ?? true;
+        }
+
+        return true;
     }
 
     /**
@@ -23,7 +60,9 @@ class UpdateFolderRequest extends FormRequest
      */
     public function rules(): array
     {
-        $folderId = $this->route('folder')->id ?? null;
+        $folder = $this->route('folder');
+        $folderId = $folder ? $folder->id : null;
+        $parentId = $this->input('parent_id', $folder ? $folder->parent_id : null);
 
         return [
             'parent_id' => [
@@ -32,19 +71,24 @@ class UpdateFolderRequest extends FormRequest
                 Rule::exists('folders', 'id'),
                 // Prevent folder from being its own parent
                 Rule::notIn([$folderId]),
+                // Prevent moving folder to its own descendant
+                function ($attribute, $value, $fail) use ($folder) {
+                    if ($value && $folder) {
+                        $descendants = \App\Models\Folder::where('parent_id', $folder->id)->pluck('id')->toArray();
+                        if (in_array($value, $descendants)) {
+                            $fail('Cannot move a folder to its own descendant.');
+                        }
+                    }
+                },
             ],
             'name' => [
                 'sometimes',
+                'required',
                 'string',
                 'max:255',
                 Rule::unique('folders', 'name')
-                    ->where(function ($query) {
-                        $folder = $this->route('folder');
-                        $parentId = $this->input('parent_id', $folder->parent_id);
-
-                        return $query->where('parent_id', $parentId)
-                            ->whereNull('deleted_at');
-                    })
+                    ->where('parent_id', $parentId)
+                    ->whereNull('deleted_at')
                     ->ignore($folderId),
             ],
             'description' => ['nullable', 'string', 'max:1000'],

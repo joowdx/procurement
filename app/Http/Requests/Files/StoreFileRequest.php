@@ -13,7 +13,44 @@ class StoreFileRequest extends FormRequest
      */
     public function authorize(): bool
     {
-        return Auth::check();
+        if (! Auth::check()) {
+            return false;
+        }
+
+        // Check workspace access if workspace_id is provided
+        $workspaceId = $this->input('workspace_id');
+        if ($workspaceId) {
+            $workspace = \App\Models\Workspace::find($workspaceId);
+            if (! $workspace) {
+                return false;
+            }
+
+            $user = Auth::user();
+
+            // Root users have access to all workspaces
+            if ($user->role === 'root') {
+                return true;
+            }
+
+            // Workspace owner always has access
+            if ($workspace->user_id === $user->id) {
+                return true;
+            }
+
+            // Check if user is a member with files permission
+            $membership = \App\Models\Membership::where('workspace_id', $workspace->id)
+                ->where('user_id', $user->id)
+                ->first();
+            if (! $membership) {
+                return false;
+            }
+
+            $permissions = $membership->permissions ?? [];
+
+            return $permissions['files'] ?? true;
+        }
+
+        return true;
     }
 
     /**
@@ -24,9 +61,16 @@ class StoreFileRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'workspace_id' => ['required', 'string', Rule::exists('workspaces', 'id')],
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:1000'],
-            'file' => ['required_if:disk,local', 'nullable', 'file', 'max:102400'], // 100MB
+            'file' => [
+                'required_if:disk,local',
+                'nullable',
+                'file',
+                'max:102400', // 100MB
+                'mimes:pdf,doc,docx,xls,xlsx,ppt,pptx,txt,csv,jpg,jpeg,png,gif,zip,rar',
+            ],
             'disk' => ['required', 'string', Rule::in(['local', 'external'])],
             'path' => [
                 'required_if:disk,external',
@@ -52,26 +96,16 @@ class StoreFileRequest extends FormRequest
     protected function validateExternalFile(string $url, callable $fail): void
     {
         try {
-            $ch = curl_init($url);
-            curl_setopt($ch, CURLOPT_NOBODY, true);
-            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            $response = \Illuminate\Support\Facades\Http::timeout(10)->head($url);
 
-            curl_exec($ch);
-            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            $contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
-
-            curl_close($ch);
-
-            if ($httpCode !== 200) {
+            if (! $response->successful()) {
                 $fail('The file URL is not accessible or does not exist.');
 
                 return;
             }
 
             // Check if it's likely a file (not HTML)
+            $contentType = $response->header('Content-Type');
             if ($contentType && str_starts_with($contentType, 'text/html')) {
                 $fail('The URL does not point to a downloadable file.');
 

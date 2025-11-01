@@ -22,9 +22,26 @@ class FolderController extends Controller
      */
     public function index(Request $request): Response|JsonResponse
     {
+        $workspaceId = $request->get('workspace_id');
+
+        // Check workspace access if workspace_id is provided
+        if ($workspaceId) {
+            $workspace = \App\Models\Workspace::findOrFail($workspaceId);
+
+            // Check if user has access to this workspace
+            if (! $this->hasWorkspaceAccess(Auth::user(), $workspace)) {
+                abort(403, 'You do not have access to this workspace.');
+            }
+        }
+
         // API request for folder selection (file upload)
         if ($request->wantsJson() && ! $request->has('filter')) {
             $query = Folder::withoutDeletedAncestors();
+
+            // Filter by workspace if provided
+            if ($workspaceId) {
+                $query->where('workspace_id', $workspaceId);
+            }
 
             if ($search = $request->get('search')) {
                 $query->where('name', 'like', "%{$search}%");
@@ -48,12 +65,12 @@ class FolderController extends Controller
         $filter = $request->get('filter');
         $search = $request->get('search');
 
-        // Calculate maximum level in database
-        $maxLevelAvailable = Folder::max('level') ?? 0;
+        // Calculate maximum level in database (filtered by workspace if applicable)
+        $maxLevelQuery = $workspaceId ? Folder::where('workspace_id', $workspaceId) : Folder::query();
+        $maxLevelAvailable = $maxLevelQuery->max('level');
 
-        // Set default max_level: 3 if available level > 3, otherwise use max available
-        $defaultMaxLevel = $maxLevelAvailable > 3 ? 3 : $maxLevelAvailable;
-        $maxLevel = $request->get('max_level', $defaultMaxLevel);
+        // Get max_level from request (null if not specified, cast to int if provided)
+        $maxLevel = $request->has('max_level') ? (int) $request->get('max_level') : null;
 
         if ($filter === 'empty') {
             // Empty folders (no files and no subfolders, excluding those with deleted ancestors)
@@ -78,16 +95,22 @@ class FolderController extends Controller
             $query->where('level', '<=', (int) $maxLevel);
         }
 
+        // Filter by workspace if provided
+        if ($workspaceId) {
+            $query->where('workspace_id', $workspaceId);
+        }
+
         $folders = $query->withCount(['children', 'placements'])
             ->orderBy('route')
             ->orderBy('order')
             ->paginate(20);
 
-        // Get counts for all filters
+        // Get counts for all filters (filtered by workspace if applicable)
+        $countsBaseQuery = $workspaceId ? Folder::where('workspace_id', $workspaceId) : Folder::query();
         $counts = [
-            'all' => Folder::withoutDeletedAncestors()->count(),
-            'empty' => Folder::withoutDeletedAncestors()->doesntHave('placements')->doesntHave('children')->count(),
-            'deleted' => Folder::onlyTrashed()->count(),
+            'all' => (clone $countsBaseQuery)->withoutDeletedAncestors()->count(),
+            'empty' => (clone $countsBaseQuery)->withoutDeletedAncestors()->doesntHave('placements')->doesntHave('children')->count(),
+            'deleted' => (clone $countsBaseQuery)->onlyTrashed()->count(),
         ];
 
         return Inertia::render('folders/index', [
@@ -101,27 +124,48 @@ class FolderController extends Controller
     }
 
     /**
+     * Check if user has access to workspace.
+     */
+    private function hasWorkspaceAccess($user, \App\Models\Workspace $workspace): bool
+    {
+        // Workspace owner always has access
+        if ($workspace->user_id === $user->id) {
+            return true;
+        }
+
+        // Root users have access to all workspaces
+        if ($user->role === 'root') {
+            return true;
+        }
+
+        // Check if user is a member
+        return $user->workspaces()->where('workspaces.id', $workspace->id)->exists();
+    }
+
+    /**
      * Store a newly created folder.
      */
     public function store(StoreFolderRequest $request): RedirectResponse
     {
         $validated = $request->validated();
 
-        $parent = $validated['parent_id'] ? Folder::find($validated['parent_id']) : null;
+        $parentId = $validated['parent_id'] ?? null;
+        $parent = $parentId ? Folder::find($parentId) : null;
 
         $folder = Folder::create([
-            'parent_id' => $validated['parent_id'],
+            'workspace_id' => $validated['workspace_id'],
+            'parent_id' => $parentId,
             'name' => $validated['name'],
             'description' => $validated['description'] ?? null,
             'level' => $parent ? $parent->level + 1 : 0,
-            'order' => Folder::where('parent_id', $validated['parent_id'])->max('order') + 1,
+            'order' => Folder::where('parent_id', $parentId)->max('order') + 1,
             'created_by' => Auth::id(),
             'updated_by' => Auth::id(),
         ]);
 
         // If creating a subfolder, redirect to parent folder show page
-        if ($validated['parent_id']) {
-            return redirect()->route('folders.show', $validated['parent_id'])
+        if ($parentId) {
+            return redirect()->route('folders.show', $parentId)
                 ->with('success', 'Folder created successfully.');
         }
 
@@ -134,6 +178,16 @@ class FolderController extends Controller
      */
     public function show(Request $request, Folder $folder): Response|JsonResponse
     {
+        // Check if folder is deleted
+        if ($folder->trashed()) {
+            abort(404);
+        }
+
+        // Check workspace access
+        if ($folder->workspace_id && ! $this->hasWorkspaceAccess(Auth::user(), $folder->workspace)) {
+            abort(403, 'You do not have access to this workspace.');
+        }
+
         // API request for lazy loading children
         if ($request->wantsJson() || $request->has('children')) {
             $children = Folder::where('parent_id', $folder->id)
@@ -146,6 +200,7 @@ class FolderController extends Controller
 
         // Regular page request
         // Fresh load to ensure we get latest data
+        $folder->loadCount(['children', 'placements']);
         $folder->load([
             'children' => function ($query) {
                 $query->withCount('children')->orderBy('order');
@@ -174,7 +229,7 @@ class FolderController extends Controller
         $folder->updated_by = Auth::id();
 
         // If parent changes, update level
-        if (isset($validated['parent_id']) && $validated['parent_id'] !== $folder->parent_id) {
+        if (array_key_exists('parent_id', $validated) && $validated['parent_id'] !== $folder->parent_id) {
             $parent = $validated['parent_id'] ? Folder::find($validated['parent_id']) : null;
             $folder->parent_id = $validated['parent_id'];
             $folder->level = $parent ? $parent->level + 1 : 0;
@@ -206,9 +261,26 @@ class FolderController extends Controller
             return redirect()->back()->with('success', 'Folder permanently deleted.');
         }
 
+        // Soft delete the folder
         $folder->delete();
 
+        // Cascade soft delete to all descendants
+        $this->cascadeDeleteDescendants($folder);
+
         return redirect()->back()->with('success', 'Folder deleted successfully.');
+    }
+
+    /**
+     * Recursively soft delete all descendants.
+     */
+    private function cascadeDeleteDescendants(Folder $folder): void
+    {
+        $children = Folder::where('parent_id', $folder->id)->get();
+
+        foreach ($children as $child) {
+            $child->delete();
+            $this->cascadeDeleteDescendants($child);
+        }
     }
 
     /**
@@ -217,11 +289,37 @@ class FolderController extends Controller
     public function restore(Request $request, string $id): RedirectResponse
     {
         $folder = Folder::withTrashed()->findOrFail($id);
+
+        // Check workspace access
+        if ($folder->workspace_id && ! $this->hasWorkspaceAccess(Auth::user(), $folder->workspace)) {
+            abort(403, 'You do not have access to this workspace.');
+        }
+
         $folder->restore();
         $folder->deleted_by = null;
         $folder->save();
 
+        // Cascade restore to all descendants
+        $this->cascadeRestoreDescendants($folder);
+
         return redirect()->back()->with('success', 'Folder restored successfully.');
+    }
+
+    /**
+     * Recursively restore all descendants.
+     */
+    private function cascadeRestoreDescendants(Folder $folder): void
+    {
+        $children = Folder::withTrashed()->where('parent_id', $folder->id)->get();
+
+        foreach ($children as $child) {
+            if ($child->trashed()) {
+                $child->restore();
+                $child->deleted_by = null;
+                $child->save();
+                $this->cascadeRestoreDescendants($child);
+            }
+        }
     }
 
     /**
@@ -241,6 +339,6 @@ class FolderController extends Controller
             }
         });
 
-        return back();
+        return redirect()->back()->with('success', 'Folders reordered successfully.');
     }
 }
